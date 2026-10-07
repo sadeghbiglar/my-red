@@ -298,7 +298,7 @@ jobs:
               PG_PASS=$(grep -E '^DB_PASSWORD=' "$HD_ENV" | cut -d= -f2-)
               PG_URL="postgresql://${PG_USER}:***@${PG_HOST}:${PG_PORT}/${PG_DB}"
             else
-              PG_URL="postgresql://h_dashboard:***@127.0.0.1:5432/h_dashboard"
+              PG_URL="postgresql://academy1:***@127.0.0.1:5432/academy1"
             fi
             printf '\nmcp_servers:\n  laravel-boost:\n    command: php\n    args: ["artisan", "boost:mcp"]\n    cwd: /home/runner/academy1\n  postgis:\n    command: uvx\n    args: ["mcp-postgis"]\n    env:\n      MCP_POSTGIS_DATABASE_URL: "%s"\n      MCP_POSTGIS_MODE: read_only\n  github:\n    command: npx\n    args: ["-y", "@modelcontextprotocol/server-github"]\n    env:\n      GITHUB_PERSONAL_ACCESS_TOKEN: "%s"\n    timeout: 120\n    connect_timeout: 60\n' "$PG_URL" "$GH_TOKEN" >> ~/.hermes/config.yaml
             echo '✅ Appended mcp_servers (laravel-boost + postgis + github) to config.yaml'
