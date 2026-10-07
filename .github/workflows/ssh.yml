@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 340
     env:
-      REPO_ORIGIN: https://github.com/academybiglar/academy1.git
+      REPO_ORIGIN: https://github.com/sadeghbiglar/academy1.git
       WF_NAME: academy
 
     steps:
@@ -125,8 +125,8 @@ jobs:
           cd academy1
 
           # Set git identity for commits
-          git config user.name "academybiglar/"
-          git config user.email "academybiglar/@users.noreply.github.com"
+          git config user.name "sadeghbiglar/"
+          git config user.email "sadeghbiglar/@users.noreply.github.com"
 
           # Fetch latest origin/beta
           git fetch origin beta
@@ -363,10 +363,10 @@ jobs:
           GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
           cd "${GITHUB_WORKSPACE:-.}"
-          git config user.name "academybiglar/"
-          git config user.email "academybiglar/@users.noreply.github.com"
+          git config user.name "sadeghbiglar/"
+          git config user.email "sadeghbiglar/@users.noreply.github.com"
           # Authenticate with PAT for push
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/academybiglar/my-red.git"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/sadeghbiglar/my-red.git"
 
           H=/home/runner/.hermes
           HDEST=hermes
