@@ -1,0 +1,408 @@
+name: rebecca
+
+on:
+  schedule:
+    - cron: '0 */7 * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      REPO_ORIGIN: https://github.com/sadeghbiglar/h-dashboard.git
+      WF_NAME: rebecca
+
+    steps:
+      # - name: Wait 10 minutes
+      #   run: sleep 600
+        
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: 2. Setup OpenSSH Server & Set Runner Password
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server
+          echo "runner:${{ secrets.RUNNER_PASSWORD }}" | sudo chpasswd
+          sudo sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sudo systemctl restart ssh
+          sudo systemctl enable ssh
+
+      - name: 3. Setup npm, PATH, and Environment Variables Persistently
+        env:
+          GH_TOKEN: ${{ secrets.MY_PAT }}
+        run: |
+          mkdir -p ~/.npm-global
+          npm config set prefix '~/.npm-global'
+
+          echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.bashrc
+          echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.profile
+          export PATH="$HOME/.npm-global/bin:$PATH"
+
+          echo "export GH_TOKEN=$GH_TOKEN" >> ~/.bashrc
+          echo "export GH_TOKEN=$GH_TOKEN" >> ~/.profile
+          echo "GH_TOKEN=$GH_TOKEN" | sudo tee -a /etc/environment
+
+          echo 'export INITIAL_PASSWORD="${{ secrets.RUNNER_PASSWORD }}"' >> ~/.bashrc
+          echo 'export INITIAL_PASSWORD="${{ secrets.RUNNER_PASSWORD }}"' >> ~/.profile
+          echo 'INITIAL_PASSWORD="${{ secrets.RUNNER_PASSWORD }}"' | sudo tee -a /etc/environment
+
+          # CodeGraph CLI — installed here, the first step where npm is on PATH.
+          # ~/.hermes/config.yaml (restored later) runs
+          # ~/.npm-global/bin/codegraph serve --mcp, so this must land before
+          # the gateway boots. The /usr/local/bin symlink keeps the plain
+          # `codegraph` command available in every shell.
+          npm install -g @colbymchenry/codegraph
+          if [ -x ~/.npm-global/bin/codegraph ]; then
+            sudo ln -sf ~/.npm-global/bin/codegraph /usr/local/bin/codegraph
+            echo "✅ CodeGraph installed: $(/usr/local/bin/codegraph --version)"
+          else
+            echo '⚠️ CodeGraph binary not found after installation'
+          fi
+
+      - name: 4. Install PHP 8.5 & Composer (Laravel + pgsql + redis)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common
+          sudo add-apt-repository -y ppa:ondrej/php
+          sudo apt-get update
+          sudo apt-get install -y \
+            php8.5 php8.5-cli php8.5-common php8.5-fpm \
+            php8.5-mbstring php8.5-xml php8.5-pgsql php8.5-curl php8.5-zip php8.5-bcmath php8.5-intl php8.5-gd \
+            php8.5-redis php8.5-tokenizer php8.5-fileinfo php8.5-ctype \
+            unzip
+          php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+          sudo php composer-setup.php --install-dir=/usr/local/bin --filename=composer
+          php -r "unlink('composer-setup.php');"
+
+      - name: 5. Connect Tailscale as Exit Node & Show Access Info
+        env:
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          sudo tailscale up --authkey="$TAILSCALE_AUTHKEY" --hostname="${{ env.WF_NAME }}" --advertise-exit-node --accept-routes --accept-dns
+
+          # Enable IP forwarding (required for exit node to route traffic)
+          echo 'net.ipv4.ip_forward = 1' | sudo tee -a /etc/sysctl.conf
+          echo 'net.ipv6.conf.all.forwarding = 1' | sudo tee -a /etc/sysctl.conf
+          sudo sysctl -p /etc/sysctl.conf
+
+          TS_IP=$(sudo tailscale ip -4)
+          echo "=================================================="
+          echo "  >>> SSH & WEB SERVER ARE LIVE! <<<"
+          echo "  Tailscale IP  : $TS_IP"
+          echo "  Username      : runner"
+          echo "  Password      : ${{ secrets.RUNNER_PASSWORD }}"
+          echo "  ------------------------------------------------"
+          echo "  💻 SSH: ssh runner@$TS_IP"
+          echo "  🌐 Web : http://$TS_IP:8000  (Laravel)"
+          echo "  🔀 9Router: http://$TS_IP:20128  (dashboard)"
+          echo "  💾 Project: /home/runner/h-dashboard"
+          echo "  🌍 Exit Node: Enabled (advertise-exit-node)"
+          echo "=================================================="
+
+      - name: 6. Authenticate gh CLI & configure git credential helper
+        env:
+          GH_TOKEN: ${{ secrets.MY_PAT }}
+        run: |
+          unset GH_TOKEN
+          echo "${{ secrets.MY_PAT }}" | gh auth login --with-token
+          gh auth setup-git
+          gh auth status
+          echo "✅ GitHub CLI authenticated as: $(gh api user -q .login)"
+
+      - name: 7. Clone / sync h-dashboard and create branch
+        env:
+          GH_TOKEN: ${{ secrets.MY_PAT }}
+        run: |
+          cd /home/runner
+          if [ ! -d h-dashboard ]; then
+            git clone "$REPO_ORIGIN"
+          fi
+          cd h-dashboard
+
+          # Set git identity for commits
+          git config user.name "sadeghbiglar/"
+          git config user.email "sadeghbiglar/@users.noreply.github.com"
+
+          # Fetch latest origin/beta
+          git fetch origin beta
+
+          # Create / reset WF_NAME branch from origin/beta
+          git checkout -B "${WF_NAME}" origin/beta
+          echo "✅ Branch ${WF_NAME} created/reset from origin/beta"
+
+          cp .env.example.pgsql .env
+
+          # .hermes.md is not wanted — AGENTS.md is the authoritative instruction
+          # file. Drop it from the checkout and from the index (without touching
+          # beta), then exclude it so `git status` stays clean.
+          if git ls-files --error-unmatch .hermes.md >/dev/null 2>&1; then
+            git rm -q --cached .hermes.md
+          fi
+          rm -f .hermes.md
+          grep -qxF '.hermes.md' .git/info/exclude 2>/dev/null \
+            || echo '.hermes.md' >> .git/info/exclude
+          echo '✅ .hermes.md removed from the checkout and the index'
+
+      - name: 8. Start Docker Compose (PostgreSQL)
+        run: |
+          cd /home/runner/h-dashboard
+          docker compose -f docker-compose-pgsql-.yml up -d
+          echo '✅ Docker Compose started'
+
+      - name: 9. Composer, NPM, Optimize, Migrate & Seed
+        run: |
+          cd /home/runner/h-dashboard
+          composer update --no-interaction
+          npm update
+          php artisan optimize
+          php artisan migrate:fresh --seed --force
+          echo '✅ Database migrated and seeded'
+
+      - name: 10. Build frontend assets
+        run: |
+          cd /home/runner/h-dashboard
+          npm run build
+          echo '✅ Frontend assets built'
+
+      - name: 10b. Index h-dashboard with CodeGraph
+        run: |
+          cd /home/runner/h-dashboard
+          if [ -x /usr/local/bin/codegraph ]; then
+            CODEGRAPH_TELEMETRY=0 codegraph init .
+            CODEGRAPH_TELEMETRY=0 codegraph status .
+            echo '✅ CodeGraph index built for h-dashboard'
+          else
+            echo '⚠️ CodeGraph not on PATH — skipping index'
+          fi
+
+      - name: 11. Install 9router globally and create symlink
+        run: |
+          npm install -g 9router
+          if [ -f ~/.npm-global/bin/9router ]; then
+            sudo ln -sf ~/.npm-global/bin/9router /usr/local/bin/9router
+            echo '✅ 9router installed and symlinked to /usr/local/bin/9router'
+          else
+            echo '⚠️ 9router binary not found after installation'
+          fi
+
+      - name: 12. Restore 9router db backup & start hidden (tray)
+        run: |
+          export INITIAL_PASSWORD="${{ secrets.RUNNER_PASSWORD }}"
+          # Make sure the data dir exists
+          mkdir -p ~/.9router/db
+          BACKUP_DIR="${GITHUB_WORKSPACE:-.}/9router"
+          # Restore the backed-up state from the repo (committed in 9router/data.sqlite)
+          if [ -f "$BACKUP_DIR/data.sqlite" ]; then
+            cp "$BACKUP_DIR/data.sqlite" ~/.9router/db/data.sqlite
+            echo '✅ Restored 9router data.sqlite from repo backup'
+          else
+            echo '⚠️ 9router/data.sqlite not found in repo — starting fresh'
+          fi
+          # Start 9router hidden in the background (tray mode) on the default port 20128.
+          # --tray is the same "hide to background" option used interactively.
+          nohup 9router --tray --skip-update -p 20128 > /tmp/9router.log 2>&1 &
+          sleep 6
+          if curl -fsS http://localhost:20128 > /dev/null 2>&1; then
+            echo '✅ 9router is live on http://localhost:20128'
+          else
+            echo '⚠️ 9router did not come up — check /tmp/9router.log'
+          fi
+
+      - name: 13. Install Hermes Agent & restore config + MCPs + start Telegram gateway
+        env:
+          HERMES_API_KEY: ${{ secrets.HERMES_CUSTOM_API_KEY }}
+          GH_TOKEN: ${{ secrets.MY_PAT }}
+          TELEGRAM_ALLOWED_USERS: ${{ secrets.TELEGRAM_ALLOWED_USERS }}  # shared across all instances
+          # Bot token picked dynamically: TELEGRAM_BOT_TOKEN_<WF_NAME>.
+          # Uniform scheme — rename the old bare TELEGRAM_BOT_TOKEN to TELEGRAM_BOT_TOKEN_MAITY.
+          TELEGRAM_BOT_TOKEN: ${{ secrets[format('TELEGRAM_BOT_TOKEN_{0}', env.WF_NAME)] }}
+        run: |
+          echo "✅ Using Telegram bot: $WF_NAME (token: TELEGRAM_BOT_TOKEN_${WF_NAME})"
+
+          # 1. Install Hermes Agent
+          curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+          echo '✅ Hermes Agent installed'
+          # Make sure uvx (used by the postgis MCP) is on PATH — Hermes ships it under ~/.hermes/bin
+          export PATH="$HOME/.hermes/bin:$PATH"
+
+          # 2. Restore hermes state (config, memories, skills, cron, hooks, etc.) from repo
+          mkdir -p /home/runner/.hermes
+          H="${GITHUB_WORKSPACE:-.}/hermes"
+          D=/home/runner/.hermes
+          for item in memories skills cron hooks platforms sessions kanban; do
+            [ -d "$H/$item" ] && cp -r "$H/$item" "$D/"
+          done
+          for f in SOUL.md config.yaml kanban.db channel_directory.json \
+                   gateway_state.json .skills_prompt_snapshot.json; do
+            [ -f "$H/$f" ] && cp "$H/$f" "$D/"
+          done
+          echo '✅ Restored hermes state from repo (hermes/ → ~/.hermes/)'
+          # 3. Write the .env with secrets pulled from GitHub Secrets.
+          #    The home channel is the same as the allowed user id (single value),
+          #    so we reuse TELEGRAM_ALLOWED_USERS for TELEGRAM_HOME_CHANNEL too.
+          #    api_key in config.yaml is an env ref (${HERMES_CUSTOM_..._API_KEY}),
+          #    so the actual key is supplied here — never committed to the repo.
+          {
+            echo "HERMES_CUSTOM_127_0_0_1_20128_API_KEY=${HERMES_API_KEY}"
+            echo "TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}"
+            echo "TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS}"
+            echo "TELEGRAM_HOME_CHANNEL=${TELEGRAM_ALLOWED_USERS}"
+            echo "GITHUB_TOKEN=${GH_TOKEN}"
+          } > ~/.hermes/.env
+          chmod 600 ~/.hermes/.env
+          echo '✅ Wrote ~/.hermes/.env from secrets'
+
+          # 4. Install MCP servers + the shadcn/improve skill.
+          #    4a. Laravel Boost MCP (php artisan boost:mcp — provided by laravel/boost)
+          #        Must run inside h-dashboard: `composer require` in the workflow's
+          #        working dir (the my-reb workspace) would install the package into
+          #        the wrong project and litter composer.json/vendor/ at its root.
+          cd /home/runner/h-dashboard
+          composer require laravel/boost --no-interaction 2>&1 | tail -3 || true
+          if [ -f /home/runner/h-dashboard/artisan ]; then
+            php artisan boost:update 2>/dev/null || true
+            echo '✅ Laravel Boost package present (MCP: php artisan boost:mcp)'
+          fi
+
+          #    4b. shadcn/improve is an AGENT SKILL, not an MCP server.
+          npx -y skills add shadcn/improve 2>&1 | tail -3 || true
+          echo '✅ shadcn/improve skill added'
+
+          #    4c. Context7 MCP (documentation lookup)
+          hermes mcp install context7 2>&1 || true
+          echo '✅ Context7 MCP installed'
+
+          #    4d. GitHub MCP Server (issues, PRs, code search via MCP protocol)
+          echo "Y" | hermes mcp add github \
+            --command npx \
+            --args -y @modelcontextprotocol/server-github \
+            --env "GITHUB_PERSONAL_ACCESS_TOKEN=$GH_TOKEN" \
+            --connect-timeout 60 2>&1 || true
+          echo '✅ GitHub MCP Server installed (26 tools: issues, PRs, code search, repos)'
+
+          # 5. Write the mcp_servers block into ~/.hermes/config.yaml.
+          #    Appended only if not already present.
+          if ! grep -q "mcp_servers" ~/.hermes/config.yaml; then
+            # Build the PostGIS connection string from h-dashboard's .env (creds are static there).
+            HD_ENV=/home/runner/h-dashboard/.env
+            if [ -f "$HD_ENV" ]; then
+              PG_HOST=$(grep -E '^DB_HOST=' "$HD_ENV" | cut -d= -f2-)
+              PG_PORT=$(grep -E '^DB_PORT=' "$HD_ENV" | cut -d= -f2-)
+              PG_DB=$(grep -E '^DB_DATABASE=' "$HD_ENV" | cut -d= -f2-)
+              PG_USER=$(grep -E '^DB_USERNAME=' "$HD_ENV" | cut -d= -f2-)
+              PG_PASS=$(grep -E '^DB_PASSWORD=' "$HD_ENV" | cut -d= -f2-)
+              PG_URL="postgresql://${PG_USER}:***@${PG_HOST}:${PG_PORT}/${PG_DB}"
+            else
+              PG_URL="postgresql://h_dashboard:***@127.0.0.1:5432/h_dashboard"
+            fi
+            printf '\nmcp_servers:\n  laravel-boost:\n    command: php\n    args: ["artisan", "boost:mcp"]\n    cwd: /home/runner/h-dashboard\n  postgis:\n    command: uvx\n    args: ["mcp-postgis"]\n    env:\n      MCP_POSTGIS_DATABASE_URL: "%s"\n      MCP_POSTGIS_MODE: read_only\n  github:\n    command: npx\n    args: ["-y", "@modelcontextprotocol/server-github"]\n    env:\n      GITHUB_PERSONAL_ACCESS_TOKEN: "%s"\n    timeout: 120\n    connect_timeout: 60\n' "$PG_URL" "$GH_TOKEN" >> ~/.hermes/config.yaml
+            echo '✅ Appended mcp_servers (laravel-boost + postgis + github) to config.yaml'
+          else
+            echo '✅ mcp_servers already present in config.yaml'
+          fi
+
+          # 7. Start the Hermes messaging gateway (Telegram) in the background.
+          #    On GitHub runners there is no systemd, so run in foreground under nohup.
+          nohup hermes gateway run --replace > /tmp/hermes-gateway.log 2>&1 &
+          sleep 6
+          if curl -fsS http://127.0.0.1:20128 > /dev/null 2>&1; then
+            echo '✅ 9router still live; Hermes gateway launching…'
+          fi
+          echo '✅ Hermes gateway launch attempted (logs: /tmp/hermes-gateway.log)'
+
+          # 8. Seed instructions -> real execution + send result to Telegram.
+          #    `hermes send` alone NEVER executes — it only relays text.
+          #    So: (a) run a real `hermes chat -q` warmup, (b) send the RESULT.
+          #    No .hermes.md is written: AGENTS.md is the authoritative
+          #    instruction file for h-dashboard and .hermes.md is not wanted.
+          SEED_FILE="${GITHUB_WORKSPACE:-.}/hermes/seed-message.txt"
+          HD_DIR=/home/runner/h-dashboard
+          if [ -f "$SEED_FILE" ]; then
+            sleep 3
+            rm -f "$HD_DIR/.hermes.md"
+            # 8a. Real agent execution — capture output to send to Telegram.
+            SEED_RESULT=$(cd "$HD_DIR" && hermes chat -q "$(cat "$SEED_FILE")" 2>/tmp/seed-warmup.log) \
+              && echo '✅ Seed executed via hermes chat' \
+              || echo '⚠️ Seed execution failed (see /tmp/seed-warmup.log)'
+            # 8b. Send the execution result (not the raw seed) to Telegram.
+            if [ -n "$SEED_RESULT" ]; then
+              echo "$SEED_RESULT" > /tmp/seed-result.txt
+              hermes send --to telegram --file /tmp/seed-result.txt \
+                && echo '✅ Seed result sent to Telegram' \
+                || echo '⚠️ Seed result failed to send'
+            else
+              hermes send --to telegram "rebecca online and ready." \
+                && echo '✅ Welcome message sent to Telegram' \
+                || echo '⚠️ Welcome message failed to send'
+            fi
+          else
+            echo '⚠️ hermes/seed-message.txt not found — skipping seed prompt'
+          fi
+
+      - name: 14. Start Laravel Development Server
+        run: |
+          cd /home/runner/h-dashboard
+          nohup php artisan serve --host=0.0.0.0 > /dev/null 2>&1 &
+          echo '✅ Laravel server started on port 8000'
+
+      - name: 15. Server Keep-Alive (340m)
+        run: |
+          for i in {1..340}; do
+            sleep 60
+            echo "[$i/340] Server is active (SSH + Laravel on port 8000)..."
+          done
+
+      - name: 16. Sync hermes state & 9router data back to my-reb
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.MY_PAT }}
+        run: |
+          cd "${GITHUB_WORKSPACE:-.}"
+          git config user.name "sadeghbiglar/"
+          git config user.email "sadeghbiglar/@users.noreply.github.com"
+          # Authenticate with PAT for push
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/sadeghbiglar/my-reb.git"
+
+          H=/home/runner/.hermes
+          HDEST=hermes
+
+          # 1. Copy all dynamic hermes dirs & files back to repo
+          mkdir -p "$HDEST"
+          for item in memories skills cron hooks platforms sessions kanban; do
+            [ -d "$H/$item" ] && cp -r "$H/$item" "$HDEST/"
+          done
+          for f in SOUL.md kanban.db state.db channel_directory.json \
+                   gateway_state.json .skills_prompt_snapshot.json; do
+            [ -f "$H/$f" ] && cp "$H/$f" "$HDEST/"
+          done
+          echo '✅ Copied hermes dynamic state → hermes/ for backup'
+
+          # 2. Copy 9router database back to repo
+          mkdir -p 9router
+          if [ -f ~/.9router/db/data.sqlite ]; then
+            cp ~/.9router/db/data.sqlite 9router/data.sqlite
+            echo '✅ Copied 9router data.sqlite → 9router/ for backup'
+          fi
+
+          # 3. Commit & push if anything changed
+          if git diff --quiet && git diff --cached --quiet; then
+            echo 'ℹ️ No changes to commit'
+          else
+            git add hermes/ 9router/ 2>/dev/null || true
+            git commit -m "Sync hermes state & 9router data from rebecca instance"
+            # Pull first in case another run pushed before us
+            git pull --rebase origin "${{ github.ref_name }}" || true
+            git push origin "${{ github.ref_name }}" || echo '⚠️ Push failed — changes saved locally'
+            echo '✅ Hermes & 9router data synced to my-reb'
+          fi
+
+      - name: 17. Tailscale Logout (cleanup on shutdown)
+        if: always()
+        run: |
+          sudo tailscale logout || true
+          echo "✅ Tailscale logout executed — hostname freed"
