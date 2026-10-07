@@ -1,4 +1,4 @@
-name: rebecca
+name: academy
 
 on:
   schedule:
@@ -10,8 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 340
     env:
-      REPO_ORIGIN: https://github.com/sadeghbiglar/h-dashboard.git
-      WF_NAME: rebecca
+      REPO_ORIGIN: https://github.com/academybiglar/academy1.git
+      WF_NAME: academy
 
     steps:
       # - name: Wait 10 minutes
@@ -100,7 +100,7 @@ jobs:
           echo "  💻 SSH: ssh runner@$TS_IP"
           echo "  🌐 Web : http://$TS_IP:8000  (Laravel)"
           echo "  🔀 9Router: http://$TS_IP:20128  (dashboard)"
-          echo "  💾 Project: /home/runner/h-dashboard"
+          echo "  💾 Project: /home/runner/academy1"
           echo "  🌍 Exit Node: Enabled (advertise-exit-node)"
           echo "=================================================="
 
@@ -114,19 +114,19 @@ jobs:
           gh auth status
           echo "✅ GitHub CLI authenticated as: $(gh api user -q .login)"
 
-      - name: 7. Clone / sync h-dashboard and create branch
+      - name: 7. Clone / sync academy1 and create branch
         env:
           GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
           cd /home/runner
-          if [ ! -d h-dashboard ]; then
+          if [ ! -d academy1 ]; then
             git clone "$REPO_ORIGIN"
           fi
-          cd h-dashboard
+          cd academy1
 
           # Set git identity for commits
-          git config user.name "sadeghbiglar/"
-          git config user.email "sadeghbiglar/@users.noreply.github.com"
+          git config user.name "academybiglar/"
+          git config user.email "academybiglar/@users.noreply.github.com"
 
           # Fetch latest origin/beta
           git fetch origin beta
@@ -150,13 +150,13 @@ jobs:
 
       - name: 8. Start Docker Compose (PostgreSQL)
         run: |
-          cd /home/runner/h-dashboard
+          cd /home/runner/academy1
           docker compose -f docker-compose-pgsql-.yml up -d
           echo '✅ Docker Compose started'
 
       - name: 9. Composer, NPM, Optimize, Migrate & Seed
         run: |
-          cd /home/runner/h-dashboard
+          cd /home/runner/academy1
           composer update --no-interaction
           npm update
           php artisan optimize
@@ -165,17 +165,17 @@ jobs:
 
       - name: 10. Build frontend assets
         run: |
-          cd /home/runner/h-dashboard
+          cd /home/runner/academy1
           npm run build
           echo '✅ Frontend assets built'
 
-      - name: 10b. Index h-dashboard with CodeGraph
+      - name: 10b. Index academy1 with CodeGraph
         run: |
-          cd /home/runner/h-dashboard
+          cd /home/runner/academy1
           if [ -x /usr/local/bin/codegraph ]; then
             CODEGRAPH_TELEMETRY=0 codegraph init .
             CODEGRAPH_TELEMETRY=0 codegraph status .
-            echo '✅ CodeGraph index built for h-dashboard'
+            echo '✅ CodeGraph index built for academy1'
           else
             echo '⚠️ CodeGraph not on PATH — skipping index'
           fi
@@ -259,12 +259,12 @@ jobs:
 
           # 4. Install MCP servers + the shadcn/improve skill.
           #    4a. Laravel Boost MCP (php artisan boost:mcp — provided by laravel/boost)
-          #        Must run inside h-dashboard: `composer require` in the workflow's
+          #        Must run inside academy1: `composer require` in the workflow's
           #        working dir (the my- workspace) would install the package into
           #        the wrong project and litter composer.json/vendor/ at its root.
-          cd /home/runner/h-dashboard
+          cd /home/runner/academy1
           composer require laravel/boost --no-interaction 2>&1 | tail -3 || true
-          if [ -f /home/runner/h-dashboard/artisan ]; then
+          if [ -f /home/runner/academy1/artisan ]; then
             php artisan boost:update 2>/dev/null || true
             echo '✅ Laravel Boost package present (MCP: php artisan boost:mcp)'
           fi
@@ -288,8 +288,8 @@ jobs:
           # 5. Write the mcp_servers block into ~/.hermes/config.yaml.
           #    Appended only if not already present.
           if ! grep -q "mcp_servers" ~/.hermes/config.yaml; then
-            # Build the PostGIS connection string from h-dashboard's .env (creds are static there).
-            HD_ENV=/home/runner/h-dashboard/.env
+            # Build the PostGIS connection string from academy1's .env (creds are static there).
+            HD_ENV=/home/runner/academy1/.env
             if [ -f "$HD_ENV" ]; then
               PG_HOST=$(grep -E '^DB_HOST=' "$HD_ENV" | cut -d= -f2-)
               PG_PORT=$(grep -E '^DB_PORT=' "$HD_ENV" | cut -d= -f2-)
@@ -300,7 +300,7 @@ jobs:
             else
               PG_URL="postgresql://h_dashboard:***@127.0.0.1:5432/h_dashboard"
             fi
-            printf '\nmcp_servers:\n  laravel-boost:\n    command: php\n    args: ["artisan", "boost:mcp"]\n    cwd: /home/runner/h-dashboard\n  postgis:\n    command: uvx\n    args: ["mcp-postgis"]\n    env:\n      MCP_POSTGIS_DATABASE_URL: "%s"\n      MCP_POSTGIS_MODE: read_only\n  github:\n    command: npx\n    args: ["-y", "@modelcontextprotocol/server-github"]\n    env:\n      GITHUB_PERSONAL_ACCESS_TOKEN: "%s"\n    timeout: 120\n    connect_timeout: 60\n' "$PG_URL" "$GH_TOKEN" >> ~/.hermes/config.yaml
+            printf '\nmcp_servers:\n  laravel-boost:\n    command: php\n    args: ["artisan", "boost:mcp"]\n    cwd: /home/runner/academy1\n  postgis:\n    command: uvx\n    args: ["mcp-postgis"]\n    env:\n      MCP_POSTGIS_DATABASE_URL: "%s"\n      MCP_POSTGIS_MODE: read_only\n  github:\n    command: npx\n    args: ["-y", "@modelcontextprotocol/server-github"]\n    env:\n      GITHUB_PERSONAL_ACCESS_TOKEN: "%s"\n    timeout: 120\n    connect_timeout: 60\n' "$PG_URL" "$GH_TOKEN" >> ~/.hermes/config.yaml
             echo '✅ Appended mcp_servers (laravel-boost + postgis + github) to config.yaml'
           else
             echo '✅ mcp_servers already present in config.yaml'
@@ -319,9 +319,9 @@ jobs:
           #    `hermes send` alone NEVER executes — it only relays text.
           #    So: (a) run a real `hermes chat -q` warmup, (b) send the RESULT.
           #    No .hermes.md is written: AGENTS.md is the authoritative
-          #    instruction file for h-dashboard and .hermes.md is not wanted.
+          #    instruction file for academy1 and .hermes.md is not wanted.
           SEED_FILE="${GITHUB_WORKSPACE:-.}/hermes/seed-message.txt"
-          HD_DIR=/home/runner/h-dashboard
+          HD_DIR=/home/runner/academy1
           if [ -f "$SEED_FILE" ]; then
             sleep 3
             rm -f "$HD_DIR/.hermes.md"
@@ -336,7 +336,7 @@ jobs:
                 && echo '✅ Seed result sent to Telegram' \
                 || echo '⚠️ Seed result failed to send'
             else
-              hermes send --to telegram "rebecca online and ready." \
+              hermes send --to telegram "academy online and ready." \
                 && echo '✅ Welcome message sent to Telegram' \
                 || echo '⚠️ Welcome message failed to send'
             fi
@@ -346,7 +346,7 @@ jobs:
 
       - name: 14. Start Laravel Development Server
         run: |
-          cd /home/runner/h-dashboard
+          cd /home/runner/academy1
           nohup php artisan serve --host=0.0.0.0 > /dev/null 2>&1 &
           echo '✅ Laravel server started on port 8000'
 
@@ -363,10 +363,10 @@ jobs:
           GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
           cd "${GITHUB_WORKSPACE:-.}"
-          git config user.name "sadeghbiglar/"
-          git config user.email "sadeghbiglar/@users.noreply.github.com"
+          git config user.name "academybiglar/"
+          git config user.email "academybiglar/@users.noreply.github.com"
           # Authenticate with PAT for push
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/sadeghbiglar/my-red.git"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/academybiglar/my-red.git"
 
           H=/home/runner/.hermes
           HDEST=hermes
@@ -394,7 +394,7 @@ jobs:
             echo 'ℹ️ No changes to commit'
           else
             git add hermes/ 9router/ 2>/dev/null || true
-            git commit -m "Sync hermes state & 9router data from rebecca instance"
+            git commit -m "Sync hermes state & 9router data from academy instance"
             # Pull first in case another run pushed before us
             git pull --rebase origin "${{ github.ref_name }}" || true
             git push origin "${{ github.ref_name }}" || echo '⚠️ Push failed — changes saved locally'
