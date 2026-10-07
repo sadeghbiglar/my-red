@@ -63,7 +63,7 @@ jobs:
             echo '⚠️ CodeGraph binary not found after installation'
           fi
 
-      - name: 4. Install PHP 8.5 & Composer (Laravel + pgsql + redis)
+      - name: 4. Install PHP 8.5 & Composer (Laravel + mysql + redis)
         run: |
           sudo apt-get update
           sudo apt-get install -y software-properties-common
@@ -71,7 +71,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             php8.5 php8.5-cli php8.5-common php8.5-fpm \
-            php8.5-mbstring php8.5-xml php8.5-pgsql php8.5-curl php8.5-zip php8.5-bcmath php8.5-intl php8.5-gd \
+            php8.5-mbstring php8.5-xml php8.5-mysql php8.5-curl php8.5-zip php8.5-bcmath php8.5-intl php8.5-gd \
             php8.5-redis php8.5-tokenizer php8.5-fileinfo php8.5-ctype \
             unzip
           php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
@@ -135,7 +135,7 @@ jobs:
           git checkout -B "${WF_NAME}" origin/beta
           echo "✅ Branch ${WF_NAME} created/reset from origin/beta"
 
-          cp .env.example.pgsql .env
+          cp .env.example.mysql .env
 
           # .hermes.md is not wanted — AGENTS.md is the authoritative instruction
           # file. Drop it from the checkout and from the index (without touching
@@ -148,10 +148,10 @@ jobs:
             || echo '.hermes.md' >> .git/info/exclude
           echo '✅ .hermes.md removed from the checkout and the index'
 
-      - name: 8. Start Docker Compose (PostgreSQL)
+      - name: 8. Start Docker Compose (MySQL)
         run: |
           cd /home/runner/academy1
-          docker compose -f docker-compose-pgsql-.yml up -d
+          docker compose -f docker-compose-mysql.yml up -d
           echo '✅ Docker Compose started'
 
       - name: 9. Composer, NPM, Optimize, Migrate & Seed
@@ -288,20 +288,9 @@ jobs:
           # 5. Write the mcp_servers block into ~/.hermes/config.yaml.
           #    Appended only if not already present.
           if ! grep -q "mcp_servers" ~/.hermes/config.yaml; then
-            # Build the PostGIS connection string from academy1's .env (creds are static there).
-            HD_ENV=/home/runner/academy1/.env
-            if [ -f "$HD_ENV" ]; then
-              PG_HOST=$(grep -E '^DB_HOST=' "$HD_ENV" | cut -d= -f2-)
-              PG_PORT=$(grep -E '^DB_PORT=' "$HD_ENV" | cut -d= -f2-)
-              PG_DB=$(grep -E '^DB_DATABASE=' "$HD_ENV" | cut -d= -f2-)
-              PG_USER=$(grep -E '^DB_USERNAME=' "$HD_ENV" | cut -d= -f2-)
-              PG_PASS=$(grep -E '^DB_PASSWORD=' "$HD_ENV" | cut -d= -f2-)
-              PG_URL="postgresql://${PG_USER}:***@${PG_HOST}:${PG_PORT}/${PG_DB}"
-            else
-              PG_URL="postgresql://academy1:***@127.0.0.1:5432/academy1"
-            fi
-            printf '\nmcp_servers:\n  laravel-boost:\n    command: php\n    args: ["artisan", "boost:mcp"]\n    cwd: /home/runner/academy1\n  postgis:\n    command: uvx\n    args: ["mcp-postgis"]\n    env:\n      MCP_POSTGIS_DATABASE_URL: "%s"\n      MCP_POSTGIS_MODE: read_only\n  github:\n    command: npx\n    args: ["-y", "@modelcontextprotocol/server-github"]\n    env:\n      GITHUB_PERSONAL_ACCESS_TOKEN: "%s"\n    timeout: 120\n    connect_timeout: 60\n' "$PG_URL" "$GH_TOKEN" >> ~/.hermes/config.yaml
-            echo '✅ Appended mcp_servers (laravel-boost + postgis + github) to config.yaml'
+            # MySQL is used for academy1 — no PostGIS MCP needed.
+            printf '\nmcp_servers:\n  laravel-boost:\n    command: php\n    args: ["artisan", "boost:mcp"]\n    cwd: /home/runner/academy1\n  github:\n    command: npx\n    args: ["-y", "@modelcontextprotocol/server-github"]\n    env:\n      GITHUB_PERSONAL_ACCESS_TOKEN: "%s"\n    timeout: 120\n    connect_timeout: 60\n' "$GH_TOKEN" >> ~/.hermes/config.yaml
+            echo '✅ Appended mcp_servers (laravel-boost + github) to config.yaml'
           else
             echo '✅ mcp_servers already present in config.yaml'
           fi
