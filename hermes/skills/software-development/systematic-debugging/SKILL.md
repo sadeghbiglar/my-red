@@ -105,6 +105,44 @@ You MUST complete each phase before proceeding to the next.
 
 For non-deterministic bugs, the immediate goal is a higher reproduction rate, not perfection. Run the trigger 100x, parallelize, add stress, narrow timing windows, or inject sleeps. A 50% flake is debuggable; a 1% flake usually is not.
 
+### When the runner swallows your instrumentation, read the raw stream
+
+A test runner that wraps output in a structured envelope can hide `fwrite(STDERR, ...)`
+debug lines behind its own compact summary, so instrumentation appears to have
+printed nothing and the log stays empty. The absence of your own output is a
+property of the RUNNER, not evidence about the bug.
+
+**Rule:** before concluding an exception was swallowed, route the runner's real
+stdout/stderr into a parser and print only the lines you tagged:
+
+```bash
+php artisan test --filter=Case 2>&1 | python3 -c "
+import sys, json
+raw = sys.stdin.read()
+try: d = json.loads(raw)
+except Exception: print(raw[:1500]); sys.exit()
+print(f\"passed={d.get('passed')} failed={d.get('failed')} errors={d.get('errors')}\")
+for f in d.get('failures', []): print('FAIL:', f['test'].split('::')[1], '->', f['message'].split(chr(10))[0][:150])
+"
+```
+
+This is a two-birds fix: you get the full failure list without dumping 50 KB of
+repeated stack traces into context, and your `STDERR` lines come back too. When the
+envelope cannot be parsed, fall through to the raw text rather than assuming the
+run produced no output.
+
+### Assert the mechanism, not just the green checkmark
+
+A build or test command can exit 0 while the feature is absent from the artifact.
+Verify the thing that must be *inside* the output — a registration, a byte count,
+a symbol — with a command whose success is a hard `grep -c` returning ≥ 1 or a size
+threshold, not a visual check of "built in 560ms".
+
+**Rule:** for any step whose output is an artifact rather than a side effect, follow
+the successful command with a content assertion on that artifact. A bundle that
+built clean but dropped a dependency is the canonical case, and no PHP test can
+catch it because no test loads the built bundle.
+
 **Action:** Use the `terminal` tool to run the tight loop:
 
 ```bash

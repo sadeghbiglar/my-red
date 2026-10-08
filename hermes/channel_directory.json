@@ -1,29 +1,11 @@
 {
-  "updated_at": "2026-10-08T10:22:01.644989",
+  "updated_at": "2026-10-08T18:33:30.640753",
   "platforms": {
     "telegram": [
-      {
-        "id": "100651143",
-        "name": "M A",
-        "type": "dm",
-        "thread_id": null
-      },
-      {
-        "id": "-1004376120571",
-        "name": "گروه تیم",
-        "type": "group",
-        "thread_id": null
-      },
       {
         "id": "6736779443",
         "name": "Sadegh Biglar",
         "type": "dm",
-        "thread_id": null
-      },
-      {
-        "id": "-1004420955221",
-        "name": "بچه ها",
-        "type": "group",
         "thread_id": null
       }
     ]

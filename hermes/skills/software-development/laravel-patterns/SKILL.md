@@ -84,6 +84,57 @@ If `UserFactory` creates a backing `Person` via `afterMaking()`, the Person's `s
 
 ## Query Pitfalls
 
+### A format regex on a date field does not validate the date
+
+`['regex:/^\d{4}\/\d{2}\/\d{2}$/']` accepts any well-shaped string, including
+month 13, day 32, and the 30th of a non-leap Jalali year. The value then reaches
+the calendar library, which either throws an uncaught exception or silently rolls
+it over — `Jalalian::fromFormat('Y/m/d', '1400/12/30')` becomes `1401/01/01`, so a
+wrong date is **stored** rather than rejected.
+
+**Rule:** shape is not validity. Write a `ValidationRule` that range-checks the
+calendar fields and then round-trips the result:
+
+```php
+public function validate(string $attribute, mixed $value, Closure $fail): void
+{
+    if (! is_string($value) || ! preg_match('/^(\d{4})\/(\d{2})\/(\d{2})$/', $value, $m)) {
+        $fail('فرمت تاریخ باید به شکل 1400/05/12 باشد.');
+        return;
+    }
+
+    [, $year, $month, $day] = $m;
+
+    if ($month < 1 || $month > 12 || $day < 1 || $day > 31) {
+        $fail('تاریخ شمسی معتبر نیست.');
+        return;
+    }
+
+    try {
+        $jalali = Jalalian::fromFormat('Y/m/d', $value);
+    } catch (\Throwable) {
+        $fail('تاریخ شمسی معتبر نیست.');
+        return;
+    }
+
+    // fromFormat() silently rolls 1400/12/30 into 1401/01/01 — catch it here.
+    if ($jalali->format('Y/m/d') !== $value) {
+        $fail('تاریخ شمسی معتبر نیست.');
+    }
+}
+```
+
+The round-trip comparison is the load-bearing line: without it a rollover passes
+validation and the wrong date reaches the column. The `try/catch` is equally
+required because the library throws on a malformed string rather than returning
+null.
+
+Drive it from a `#[DataProvider]` table so the impossible-but-well-shaped cases
+are named in the test file — `1380/13/01`, `1400/12/30`, `1380-05-12` (wrong
+separator), Persian digits — rather than left to whoever next edits the rule.
+Assert the rejection reaches the database guard too (`assertDatabaseCount(..., 0)`),
+or a rule that fails to fire is indistinguishable from one that never ran.
+
 ### `ORDER BY` + `LIMIT` returns the OLDEST N, not the newest
 
 `orderBy('day')->limit(30)` after a `groupBy('day')` returns the 30 *oldest* buckets, because ORDER BY is applied before LIMIT. Any "last N days/weeks" chart or list built this way silently shows the oldest window once the table holds more than N distinct periods.
@@ -144,6 +195,31 @@ $row->forceFill(['created_at' => $day, 'updated_at' => $day])->save();
 ```
 
 Give time-window fixtures a **midday** timestamp. The app timezone and the database session timezone often differ, and `date(column)` buckets in the *session* zone — a midnight value can fall in the previous day and shift the whole window.
+
+## Blade Views & Livewire Pages
+
+### `{-- --}` is not a Blade comment — it renders as literal page text
+
+A Blade comment is `{{-- --}}` with **two** braces. The single-brace form `{-- --}`
+is not compiled away: it survives into the rendered HTML as visible text, so an
+implementation note written above a label shows up in the interface.
+
+**Rule:** in any view, use `{{-- --}}`. In a Livewire page component (a view whose
+filename carries the `⚡` prefix and which opens with a `new class extends
+Component` block) the risk is higher, because the file is executed as PHP before
+Blade ever sees the markup, and a reviewer copying the file's existing comment style
+will copy it correctly only if the existing ones are right.
+
+Guard it cheaply — the assertion costs nothing and catches the whole class:
+
+```php
+$html = Livewire::test('pages::students.index')->html();
+$this->assertStringNotContainsString('{--', $html);
+$this->assertStringNotContainsString('Some implementation note', $html);
+```
+
+Prove the guard bites by reintroducing the bad syntax and watching it go red;
+a leak test that has never failed proves nothing.
 
 ## Seeders & Seed Data
 
@@ -334,6 +410,23 @@ const categories = chart.xAxis[0].categories;
 
 Verify the date/label conversion in both languages instead of hand-rolling calendar arithmetic on one side. Format dates with the platform's own calendar implementation (e.g. `Intl.DateTimeFormat` with the `persian` calendar) and resolve labels back to real dates by a **round-trip** — a label is a match only if formatting the candidate date reproduces the label. Hand-written month-offset approximations drift across year boundaries and silently assert against the wrong date.
 
+### A browser-reachable feature may need no JavaScript at all
+
+A date picker in a Livewire app does not require an npm widget, a web component,
+or a JS bridge. When the server already carries a calendar library, month-stepping
+and day-click are ordinary `wire:click` actions: the picker renders entirely in
+Blade, the project gains **no** bundle bytes, and an entire class of failures
+(two-way binding, tree-shaking, morph re-wiring) simply does not exist.
+
+**Rule:** price the no-dependency option first for any widget in a Blade/Livewire
+app. A JS library is justified by an interaction Blade cannot express — drag
+canvas, virtualised list, signature capture — not by the fact that the calendar
+grid takes work to lay out. If the user rejects an installed library as unwelcome,
+remove it and build the native version rather than defending the choice.
+
+See `references/native-date-picker.md` for the file shape, the `morilog/jalali`
+API traps, and the three bugs that pass a PHP suite and fail only in a browser.
+
 ## Static Analysis
 
 ### A regenerated baseline is evidence, not a formality
@@ -399,6 +492,51 @@ The symptom is silent in three places at once, which is what makes it expensive:
 See `references/livewire-testing.md` for how to surface the raw update response
 instead of guessing at component code.
 
+### A `sideEffects: false` web component can be tree-shaken out of the bundle while every PHP test passes
+
+A custom element whose only job is the side effect of
+`customElements.define('my-element', ...)` still ships `"sideEffects": false`.
+Rollup drops the import, so the tag is never registered and the widget is inert
+in the browser — while `php artisan test` stays green, because no test loads the
+real browser bundle.
+
+**Rule: for any feature that depends on a JS library shipping in the build,
+verify the registration in the built artifact.** Bundle size is the fast
+discriminator — a 57 KB dependency that vanished leaves a 1 KB stub.
+
+```bash
+npm run build
+ls -la public/build/assets/            # a 1 KB app bundle is the smell
+grep -c "customElements.define" public/build/assets/app-*.js   # must be >= 1
+```
+
+Fix with a Vite `transform` plugin returning `moduleSideEffects: 'no-treeshake'`
+for that package. `build.rollupOptions.treeshake.moduleSideEffects`, `void SomeExport`,
+and `customElements.whenDefined(...)` in your own module all leave the import
+dropped — do not burn a cycle on them.
+
+### `wire:model` does not bind to a custom element — check `observedAttributes`
+
+Livewire's binding reads and writes real form controls. A web component keeps its
+value in a JS **property**, so `wire:model` on the tag is inert even though the
+attribute is visibly in your markup and validation rules still read a plausible
+empty string.
+
+**Rule:** before designing the integration, check whether `value` appears in the
+element's `observedAttributes`. If it does not, attribute binding cannot work;
+bridge the element to a hidden input Livewire owns and drive `getValue()` /
+`setValue()`. Keep the hidden input as the server-side source of truth so
+validation and the model write are unchanged.
+
+See `references/livewire-web-components.md` for the full bridge and the build check.
+
+**But first ask whether you need the component at all.** If the server already
+carries the calendar library (Jalali dates, working days, money), a Livewire page
+can render the whole picker in Blade with zero JavaScript — see
+`references/native-date-picker.md`. Reach for an npm widget only when the
+interaction is genuinely impossible in Blade (a drag canvas, a virtualised list),
+not merely because building it takes an afternoon.
+
 ### Stale event cache after removing listeners
 
 `bootstrap/cache/events.php` caches event-to-listener mappings. After deleting a listener class and removing it from `EventServiceProvider::$listen`, run `php artisan event:clear` — otherwise the Dispatcher tries to `include()` the deleted file and crashes.
@@ -463,6 +601,7 @@ mean re-running the test suite afterwards, since the installed tree changed.
 
 - Before declaring an app "running": drive the real UI, not `curl` — see `references/browser-verification.md`. A served route does not prove interactive controls work.
 - When a Livewire action silently does nothing: work `references/livewire-testing.md` top-down (control component → route reachability → caches → generated class → component code) before editing the component. The control component is step 0 because it splits the search in half.
+- A green PHP suite does NOT verify a JS-library feature. The server contract and the browser bundle are separate proofs — `grep "customElements.define"` the built asset, then drive the real page (`references/livewire-web-components.md`).
 - Tests passing is NOT the finish line for a CRUD feature. A full round trip through the actual UI (create → read back from the DB → edit → confirm `updated_at` moved → delete → confirm the row is gone) is what "works" means; automated tests and a 200 on `/` can both be green while every button is dead.
 
 ### Run Pint through the PHP binary when the shell wrapper is refused
