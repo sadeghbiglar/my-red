@@ -106,6 +106,26 @@ DB::query()->fromSub($daily, 'daily')->orderBy('day')->get();
 
 The resulting axis is **sparse** — the N most recent periods *that have rows*, not N consecutive periods. A test that asserts "N consecutive days" fails against correct code; assert the real contract instead (≤ N buckets, strictly ascending, newest bucket reaches the newest data).
 
+### `paginate()` without a deterministic `orderBy` repeats and skips rows
+
+MySQL is free to return rows in any order without `ORDER BY`, so `LIMIT/OFFSET`
+pagination can repeat a row on page 2 and drop another entirely — and it looks fine on a
+table small enough to fit one page. Add `->orderByDesc('id')` (or the intended sort) to
+every paginated query.
+
+### An empty search string still injects a `LIKE '%%'` clause
+
+Wrapping the filter in `where(function ($q) { ... orWhere(...) })` without guarding on
+the term being empty adds a redundant `LIKE '%%'` to every request and — with certain
+index mixes — can defeat index use on the whole table. Guard it:
+
+```php
+->when($this->search !== '', fn ($query) => $query->where(function ($q) {
+    $q->where('first_name', 'like', '%'.$this->search.'%')
+      ->orWhere('last_name', 'like', '%'.$this->search.'%');
+}))
+```
+
 ### A model without `HasFactory` has no `::factory()`, whatever factories exist
 
 A `XyzFactory` file on disk does not mean `Xyz::factory()` resolves — that requires `use HasFactory;` on the model. Without it you get `BadMethodCallException: Call to undefined method`, which reads like a broken factory definition but is a missing trait on the model.
@@ -167,23 +187,47 @@ history actually attached to the intended record.
 
 ### `migrate:fresh --seed` needs a dump before it runs, and its output hides the interesting part
 
-`--fresh` drops every table. Take a `pg_dump -Fc` first; it is cheap insurance and the only way
-back if the seed turns out to be lossy. Also snapshot per-table row counts BEFORE, and diff them
-after — equal counts across the board is the evidence that seeders rebuilt the reference data
-rather than leaving hand-made rows, and a table that came back with a different count tells you
-which seeder is non-deterministic (or that some table is not seeded at all).
+`--fresh` drops every table. On PostgreSQL take a `pg_dump -Fc` first and snapshot
+per-table counts to diff afterwards — see `references/postgres-seed-verification.md` for
+the exact queries. Put dump files somewhere gitignored, or they show up as untracked noise
+on the next `git status`.
 
-```bash
-export PGPASSWORD="$(grep -E '^DB_PASSWORD=' .env | cut -d= -f2- | tr -d \"'\")"
-pg_dump -h 127.0.0.1 -U h_dashboard -d h_dashboard -Fc -f .hermes-backups/db-$(date +%Y%m%d-%H%M%S).dump
+**Rule:** a seed run is verified when every seeder reports DONE and the post-seed counts
+match the pre-seed snapshot. Anything else is a partial success that reads exactly like a
+full one.
+
+### A seeder tree needs two things: wiring, and idempotency
+
+Two failure modes hide behind a green first run:
+
+1. **The child seeder is never called.** `DatabaseSeeder` that only creates a User looks
+   complete; the 20-row `StudentSeeder` sitting next to it is dead code. Every seed run
+   reports success and the table stays empty. Verify the seeded row count in the database,
+   not just the exit code.
+2. **A fixed-value factory `create()` is not re-runnable.** `User::factory()->create(['email' => 'test@example.com'])`
+   throws `UniqueConstraintViolationException` on the second run, so seeding is a one-shot
+   and CI/`db:seed --force` loops break. Key on the unique column with `firstOrCreate`.
+
+```php
+User::firstOrCreate(
+    ['email' => 'test@example.com'],
+    ['name' => 'Test User', 'password' => bcrypt('password')],
+);
+
+$this->call(StudentSeeder::class);
 ```
 
-Snapshot counts with a single `DB::select()` over `pg_tables` rather than one query per table.
-Put dump files somewhere gitignored, or they show up as untracked noise on the next `git status`.
+For count-based demo data, seed the DELTA rather than the target, so the seeder is
+idempotent without silently resurrecting rows a user deleted:
 
-**Rule:** a seed run is verified when every seeder reports DONE, the PostGIS/extension versions
-still resolve, and the post-seed counts match the pre-seed snapshot. Anything else is a partial
-success that reads exactly like a full one.
+```php
+$existing = Student::count();
+if ($existing >= self::COUNT) { $this->command?->info("skipping ({$existing} rows)"); return; }
+Student::factory()->count(self::COUNT - $existing)->create();
+```
+
+Print the final count through `$this->command?->info(...)` — a silent early return reads
+exactly like a successful seed in the output.
 
 ### A deterministic back-dated seeder must key on a value that exists
 
@@ -331,7 +375,29 @@ $user->forceDelete(); // actually removes the row
 $person->delete();
 ```
 
-## Event Cache
+## Build & Route Caches
+
+### A route cache built before `key:generate` 404s the Livewire update endpoint
+
+Livewire 4 derives a hash from the app key inside its update URI
+(`POST /livewire-<hash>/update`). A `bootstrap/cache/routes-v7.php` compiled while
+`APP_KEY` was empty still holds the OLD hash, so after `key:generate` the route the
+test/browser resolves no longer matches the cached one and every component update
+returns **404**. `route:clear`/`optimize:clear` fixes it; nothing else does.
+
+**Rule:** run `php artisan optimize:clear` immediately after `key:generate` (and after
+any `.env` change that feeds route/container compilation), before debugging anything
+else. Treat "component interactions do nothing, no error, no exception" as a
+route-registration symptom first, not a component-code symptom.
+
+The symptom is silent in three places at once, which is what makes it expensive:
+- in a browser, modals never open and live search never filters;
+- in a Livewire test, `->set()` / `->call()` appear to run but change nothing — the
+  component instance comes back `null` and the errors bag is empty;
+- the log stays empty.
+
+See `references/livewire-testing.md` for how to surface the raw update response
+instead of guessing at component code.
 
 ### Stale event cache after removing listeners
 
@@ -343,12 +409,61 @@ php artisan event:clear
 
 This is separate from `config:clear` and `route:clear`.
 
+## Bringing an App Up
+
+### A Blade file that fails to parse — check for a stray non-ASCII character, then check it is even referenced
+
+A zero-width or combining character dropped inside a `<?php` block (a Persian/Arabic
+combining mark, a bidi control) makes the file a parse error with a misleading column.
+Dump codepoints around the reported line instead of reformatting by eye:
+
+```bash
+python3 -c "d=open('f.blade.php',encoding='utf-8').read(); i=d.find('́'); print(repr(d[i-40:i+20])); print([hex(ord(c)) for c in d[i-3:i+3]])"
+```
+
+**Rule:** before fixing the parse error, confirm the file is actually reachable —
+`search_files` the component/route name. Livewire page components often ship alongside
+a leftover hand-rolled component with the same title. A parse-broken duplicate that
+nothing routes to is dead code: delete it rather than repair it. Same for a controller
+with no route and a view no component renders.
+
+### Moving a package between `require` and `require-dev` needs `composer require`, not `--lock`
+
+Moving an entry invalidates `composer.lock`'s content hash, so `composer validate` reports
+`Required (in require-dev) package "x" is not present in the lock file`. That message is not
+about the hash — the package is genuinely absent from both `packages` and `packages-dev`.
+
+**Rule:** fix it with `composer require`, which resolves the tree AND places the package in the
+right section:
+
+```bash
+composer require --dev <pkg>:^<version> --no-scripts --no-interaction
+```
+
+**Do not reach for `composer update --lock`.** It only rewrites the content hash; it does not
+add the missing package, so `validate` still fails afterwards and you have burned a cycle
+believing you fixed it. `composer update <pkg> --lock` is separately rejected outright
+("cannot update only a selection and regenerate the lock metadata").
+
+Verify by asserting the section, not by reading `validate`'s exit code alone:
+
+```bash
+python3 -c "
+import json; l=json.load(open('composer.lock'))
+for sec in ('packages','packages-dev'):
+    print(sec, '-> pkg:', '<pkg>' in [p['name'] for p in l[sec]])
+"
+```
+
+A correct move also pulls the package's transitive dependencies into the lock (a Laravel dev
+tool can add four or five packages). That size jump is expected, not a mistake — but it does
+mean re-running the test suite afterwards, since the installed tree changed.
+
 ## Verification
 
-- After cache batching changes: run the full test suite — dedup bugs silently pass unit tests but break feature tests that assert exact version counts.
-- After removing event listeners: always `event:clear` before running tests.
-- After model event changes: test both create and update paths — they exercise different code paths in `saved` callbacks.
-- After editing seed data or a seeder: read the seeder's informational lines, not just its `DONE` line — a silent skip is reported there and nowhere else.
+- Before declaring an app "running": drive the real UI, not `curl` — see `references/browser-verification.md`. A served route does not prove interactive controls work.
+- When a Livewire action silently does nothing: work `references/livewire-testing.md` top-down (control component → route reachability → caches → generated class → component code) before editing the component. The control component is step 0 because it splits the search in half.
+- Tests passing is NOT the finish line for a CRUD feature. A full round trip through the actual UI (create → read back from the DB → edit → confirm `updated_at` moved → delete → confirm the row is gone) is what "works" means; automated tests and a 200 on `/` can both be green while every button is dead.
 
 ### Run Pint through the PHP binary when the shell wrapper is refused
 

@@ -1,0 +1,43 @@
+# User-level supervisor unit for a long-lived web app server.
+#
+# Why: a background process started by an agent dies with the agent lifecycle. A server
+# the user keeps visiting across turns needs Restart=always plus `enable` to survive
+# logout and reboot.
+#
+# Install:
+#   cp templates/systemd-user-webapp.service ~/.config/systemd/user/webapp.service
+#   $EDITOR ~/.config/systemd/user/webapp.service     # edit the three EDIT fields
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now webapp.service
+#
+# Then verify from the USER'S url, not loopback:
+#   for i in $(seq 1 15); do
+#     code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://HOST:PORT/)
+#     [ "$code" = "200" ] && { echo "ready after ${i}s"; break; }; sleep 1
+#   done
+
+[Unit]
+Description=web app dev server on :8000
+After=network.target
+# Start the backing services the app needs, if any:
+# Wants=docker.service
+
+[Service]
+Type=simple
+
+# EDIT 1 - absolute path to the project root
+WorkingDirectory=/home/runner/my-app
+
+# EDIT 2 - bind 0.0.0.0 when the user reaches the server from another device
+ExecStart=/usr/bin/php artisan serve --host=0.0.0.0 --port=8000
+
+Restart=always
+RestartSec=3
+Environment=APP_ENV=local
+
+# EDIT 3 - keep logs out of the repo's tracked log dir if that dir is gitignored cleanly
+StandardOutput=append:/home/runner/my-app/storage/logs/serve.log
+StandardError=append:/home/runner/my-app/storage/logs/serve.log
+
+[Install]
+WantedBy=default.target

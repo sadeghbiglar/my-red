@@ -278,6 +278,54 @@ authentication while `gh` is still authenticated. Fall back to `gh api` for the
 write, confirm it returned a comment `html_url`, and report that URL — a bare exit 0
 from the CLI does not prove the comment posted.
 
+## Separating your changes from pre-existing drift before committing
+
+"Commit the work you did" is a scoping instruction, not "commit everything modified". A working
+tree that was already dirty when you started contains changes you did not make and must not
+sweep into your commit. Identify them by MTIME, which is the only reliable discriminator —
+`git status` cannot tell who touched what:
+
+```bash
+# files predating your session belong to someone else; keep them out
+stat -c '%y  %n' package-lock.json composer.json tests/Feature/MyNewTest.php
+git checkout -- package-lock.json          # restore only the confirmed-foreign ones
+git add -A -- . ':!package-lock.json'      # then stage everything else
+```
+
+**Rule:** before staging, check the MTIME of each modified file against when your session
+started. A lockfile older than your first command is pre-existing drift — leave it out and say
+so in the report rather than quietly absorbing it. Use a pathspec exclusion
+(`git add -A -- . ':!<file>'`) so the exclusion is explicit and reviewable, and never
+`git stash`/`reset` a file you did not create.
+
+Report the excluded file by name with its diffstat so the user can decide separately whether to
+commit it. A skipped file they never knew about becomes their surprise later.
+
+## Committing a long fix: explain the root cause in the body, not just the symptoms
+
+When a commit bundles a fix whose root cause was environmental (a stale cache, a missing
+extinction, a config value), the diff alone does not show it — a reviewer sees only the code
+changes and cannot tell why they were necessary. State the cause in the commit body, including
+when it was NOT a code change:
+
+```
+Note: a stale bootstrap/cache/routes-v7.php built before APP_KEY existed made the
+Livewire update endpoint 404, which broke every interactive element. Fixed by
+clearing the caches; not a code change.
+```
+
+**Rule:** for each hunk, give the mechanism ("this breaks because X"), not the restatement
+("fixed Y"). Cover the deletions too — a removed controller or view needs its reason recorded,
+or the next reader re-adds it. Verify the scope you claim: `git diff --cached --stat` before
+committing, and grep the staged diff for hardcoded secrets
+(`git diff --cached | grep -iE '^\+.*(password|secret|token)\s*=\s*["\x27][^"\x27]{6,}'`).
+
+## Reporting a commit honestly when you did not push
+
+State plainly which of these happened: committed, pushed, or committed-and-ahead. `git status -sb`
+showing `[ahead 1]` after a commit means the work is LOCAL ONLY — say so and offer to push
+rather than describing a local commit as "delivered".
+
 ## Pitfalls
 
 ### Nested `.git` directories when copying content
