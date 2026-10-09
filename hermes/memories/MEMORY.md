@@ -1,1 +1,1 @@
-
+Machine: /home/runner/academy1 is the only active repo (h-dashboard was deleted 2026-10-09). php8.5-sqlite3 was missing and installed via sudo apt-get so Laravel's in-memory sqlite tests work. systemd user units work: academy1-serve.service supervises `php artisan serve` on 0.0.0.0:8000 and is enabled at boot.

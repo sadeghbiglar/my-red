@@ -20,6 +20,11 @@ Repo: `/home/runner/h-dashboard` (also the configured Hermes `terminal.cwd`).
 Branch: `rebecca`. Canonical upstream: `asgarimehdi/h-dashboard`, branch `beta`.
 Only remote is `origin` (this server's fork); **never add, rename, or delete remotes.**
 
+> **As of 2026-10-09 this repo no longer exists on disk** — `/home/runner/h-dashboard` was
+> removed and only `/home/runner/academy1` remains. Hermes `config.yaml` still pointed the
+> `codegraph` and `laravel_boost` MCP servers at `h-dashboard`; both were repointed to
+> `academy1`. Load the `academy1-session` skill instead for current work.
+
 ## 1. Never
 - Do not clone a second copy of the repo.
 - Do not switch branches unless asked.
