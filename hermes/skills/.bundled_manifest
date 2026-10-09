@@ -15,7 +15,7 @@ competitor-news-monitor:3a0452873c3c1e6dc0f7391bdb9c5b99
 computer-use:f50dbe8683a220cc2bb2b31ec1480786
 design-md:91a8976ef5d37db2451721db9c2b93da
 document-to-action-items:ddd27a7470703b3f90cd188af9ac3f02
-docx:eb11f166f307f0475dc7bdd30352d19a
+docx:166a19069f3b89ab8e66002c0a4a09df
 dogfood:712241a2cdd1f814f671cd650458ed87
 email-inbox-triage:e1a93e160552107366dd009159e5fa1a
 findmy:7435a65c3e7bd7c162f22db27a1c91a5
@@ -23,7 +23,7 @@ gif-search:12dbdb5d4a04f05aeb20bebcb7d3f60a
 github:78ea77a0f12ba2d7859b94c5ed01896c
 google-workspace:094eb401d5218e750e85696ead47425f
 grounded-citations:8b9a74b4fbc7ed79ef1d3a55d4a30e58
-hermes-agent:86abb4a488b7811b8c19e539a7e91682
+hermes-agent:5fee35de770d75802f4a966d88cd4f2f
 hermes-agent-skill-authoring:fadc813c9a0a9ec5a6e6d6d200c15deb
 himalaya:d215ffaa3c1aecbc68a326e45d6927c8
 humanizer:b3fa12781b41b4008fba21073632e3d0
@@ -40,7 +40,7 @@ opencode:ae1e0ac2700d28fe31bc8ca38e5c00d2
 p5js:7acaf517723c87f67b00458431ff7b4a
 pdf:115f3104d970df54199cd9079cc9ec10
 popular-web-designs:b3fd685e8fbcf981755609ce98a4eea9
-powerpoint:ff44da32358cd5dc2c12ab8dfb331d7d
+powerpoint:f81d3df5ef7a52996e8212ce185b8a47
 product-price-monitor:7dd11fd1609f3bec2486d925ad924714
 python-debugpy:d125fa10b155d27d2399ebefca7d6143
 requesting-code-review:a5f1e52435ea08f7251e4353cb54f545
@@ -53,6 +53,6 @@ systematic-debugging:09b23d68c842d5273b02f59223b0b580
 teams-meeting-pipeline:7689bbd6971278733fa35af7930e4a11
 test-driven-development:d1245a9a2350c1a5295907f41f137e69
 weekly-review-planning:5c8b6b42dd004e269df5a67dfdc8e30f
-xlsx:25cac69066b239749e383400b0d03ef2
+xlsx:bea5049ab9021064b3fcfcfaac1c64dc
 xurl:bb9c33efe0e1e037061398b7981431a1
-youtube-content:4e709cc7151d5ddaf1bf4c4064200fe8
+youtube-content:51a0793b5aaf97ace30e2da603394ef1
