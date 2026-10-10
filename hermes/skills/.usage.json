@@ -6,14 +6,14 @@
     "first_seen_at": null,
     "last_patched_at": null,
     "last_reused_patch_generation": 0,
-    "last_used_at": null,
-    "last_viewed_at": null,
+    "last_used_at": "2026-10-09T20:00:36.925686+00:00",
+    "last_viewed_at": "2026-10-09T20:00:36.924619+00:00",
     "patch_count": 0,
     "patch_generation": 0,
     "pinned": false,
     "state": "active",
-    "use_count": 0,
-    "view_count": 0
+    "use_count": 1,
+    "view_count": 1
   },
   "agent-docs-audit": {
     "archived_at": null,
@@ -163,15 +163,15 @@
     "created_by": "learn",
     "first_seen_at": null,
     "last_patched_at": "2026-10-09T16:38:39.184331+00:00",
-    "last_reused_patch_generation": 7,
-    "last_used_at": "2026-10-09T16:32:18.391469+00:00",
-    "last_viewed_at": "2026-10-09T16:32:18.390108+00:00",
+    "last_reused_patch_generation": 8,
+    "last_used_at": "2026-10-09T20:00:57.778303+00:00",
+    "last_viewed_at": "2026-10-09T20:00:57.772833+00:00",
     "patch_count": 8,
     "patch_generation": 8,
     "pinned": false,
     "state": "active",
-    "use_count": 31,
-    "view_count": 31
+    "use_count": 32,
+    "view_count": 32
   },
   "hermes-agent": {
     "archived_at": null,
