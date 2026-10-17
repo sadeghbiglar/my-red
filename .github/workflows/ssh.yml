@@ -20,7 +20,14 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 340
+    # MUST stay comfortably ABOVE the keep-alive loop in step 15, and BELOW the
+    # 6h cron interval. GitHub kills the whole job at timeout-minutes WITHOUT
+    # running `if: always()` steps — so when this equalled the keep-alive length
+    # (340 == 340) step 17 `tailscale logout` was killed before it ran, the node
+    # stayed registered in the tailnet, and the next run got the name
+    # `academy-1`. Keep-alive 300 + timeout 330 + 6h cron = a 30 minute window in
+    # which steps 16 and 17 always complete.
+    timeout-minutes: 330
     env:
       REPO_ORIGIN: https://github.com/sadeghbiglar/academy1.git
       WF_NAME: academy
@@ -420,11 +427,11 @@ jobs:
           nohup php artisan serve --host=0.0.0.0 > /dev/null 2>&1 &
           echo '✅ Laravel server started on port 8000'
 
-      - name: 15. Server Keep-Alive (340m)
+      - name: 15. Server Keep-Alive (300m)
         run: |
-          for i in {1..340}; do
+          for i in {1..300}; do
             sleep 60
-            echo "[$i/340] Server is active (SSH + Laravel on port 8000)..."
+            echo "[$i/300] Server is active (SSH + Laravel on port 8000)..."
           done
 
       - name: 16. Sync hermes state & 9router data back to my-red
@@ -475,8 +482,18 @@ jobs:
             echo '✅ Hermes & 9router data synced to my-red'
           fi
 
-      - name: 17. Tailscale Logout (cleanup on shutdown)
+      - name: 17. Tailscale Logout (frees the `academy` name for the next run)
+        # This MUST run. If it is skipped the node stays registered in the tailnet
+        # and the next runner joins as `academy-1`. `always()` alone is not enough:
+        # a job killed at timeout-minutes never runs it, which is why timeout is
+        # set above the keep-alive length.
         if: always()
         run: |
           sudo tailscale logout || true
           echo "✅ Tailscale logout executed — hostname freed"
+          sleep 5
+          if sudo tailscale status --json >/dev/null 2>&1; then
+            echo "⚠️ tailscaled still reports a state after logout — the node may linger in the tailnet."
+          else
+            echo "✅ tailscaled is down — node fully removed"
+          fi
