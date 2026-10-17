@@ -58,6 +58,24 @@ Full enumeration: `TOOLSETS` dict in `toolsets.py` (`_HERMES_CORE_TOOLS` is the 
 
 Tool changes take effect on `/reset` (new session) — never mid-conversation, to preserve prompt caching.
 
+### Handing a config edit to the user (never paste YAML)
+
+`write_file` / `patch` REFUSE `~/.hermes/config.yaml` — it is security-sensitive and
+locked to the user. So a fix you cannot apply yourself must be handed off, and it must
+be handed off as **one copy-pasteable shell command**, never as a YAML fragment:
+
+```bash
+sed -i 's#/old/path#/new/path#g' ~/.hermes/config.yaml
+grep -n 'new/path' ~/.hermes/config.yaml      # verify in the same step
+```
+
+Why: YAML list items begin with `- `, so pasting `- cd /path && cmd` into a shell
+gives `-: command not found`. The user reasonably reads a quoted YAML block as a
+command. Same failure mode for a bare-value `hermes config set` example.
+
+After the user reports running it, **re-read the file yourself and confirm the line
+changed** — a paste failure is silent and leaves the config untouched.
+
 ## Voice
 
 ### STT (Voice → Text)

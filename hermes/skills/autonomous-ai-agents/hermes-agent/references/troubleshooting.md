@@ -20,6 +20,8 @@
 - **Tools/skills:** `/reset` starts a new session with updated toolset
 - **Config changes:** In gateway: `/restart`. In CLI: exit and relaunch.
 - **Code changes:** Restart the CLI or gateway process
+- **MCP servers:** loaded only at process start — repointing a server at a moved repo
+  needs a full gateway restart, `/reset` is not enough.
 
 ### web_extract shows a stale page (result caching)
 `web_search`/`web_extract` cache results for 20 minutes (PR #94618) — a
@@ -63,6 +65,33 @@ Common gateway problems:
 - **Gateway dies on SSH logout**: Enable linger: `sudo loginctl enable-linger $USER`
 - **Gateway dies on WSL2 close**: WSL2 requires `systemd=true` in `/etc/wsl.conf` for systemd services to work. Without it, gateway falls back to `nohup` (dies when session closes).
 - **Gateway crash loop**: Reset the failed state: `systemctl --user reset-failed hermes-gateway`
+
+### Restarting a gateway that is NOT a systemd service
+
+`hermes gateway restart` only restarts an installed systemd/launchd unit. Check first:
+
+```bash
+hermes gateway status
+```
+
+If it reports *"Running manually, not as a system service"*, `restart` will not help —
+the process was started by hand. Warn the user before acting, because a restart drops
+the live messaging session they are currently typing in:
+
+```bash
+# in the terminal that launched it:
+Ctrl+C
+hermes gateway run                       # foreground
+# or detached:
+nohup hermes gateway run > ~/.hermes/logs/gateway.log 2>&1 &
+```
+
+Durable fix: `hermes gateway install` (user-level; add `sudo` + `--system` for
+machine-wide). After that `hermes gateway restart` works and the gateway survives
+reboot. With multiple profiles active, `hermes gateway list` shows each one.
+
+Related: a `cd <deleted-dir> && <cmd>` MCP server fails to start and looks like a
+broken tool. Verify the configured path exists before blaming the tool.
 
 ### Platform-specific issues
 - **Discord bot silent**: Must enable **Message Content Intent** in Bot → Privileged Gateway Intents.

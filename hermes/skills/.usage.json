@@ -1,4 +1,20 @@
 {
+  "academy1-report": {
+    "archived_at": null,
+    "created_at": "2026-10-17T20:21:10.813520+00:00",
+    "created_by": "learn",
+    "first_seen_at": null,
+    "last_patched_at": "2026-10-17T20:29:17.317122+00:00",
+    "last_reused_patch_generation": 0,
+    "last_used_at": "2026-10-17T20:29:13.539928+00:00",
+    "last_viewed_at": "2026-10-17T20:29:13.538827+00:00",
+    "patch_count": 4,
+    "patch_generation": 4,
+    "pinned": false,
+    "state": "active",
+    "use_count": 1,
+    "view_count": 1
+  },
   "academy1-session": {
     "archived_at": null,
     "created_at": "2026-10-09T16:38:36.913464+00:00",
@@ -157,36 +173,20 @@
     "use_count": 10,
     "view_count": 10
   },
-  "h-dashboard-session": {
-    "archived_at": null,
-    "created_at": "2026-10-01T21:47:07.167377+00:00",
-    "created_by": "learn",
-    "first_seen_at": null,
-    "last_patched_at": "2026-10-09T16:38:39.184331+00:00",
-    "last_reused_patch_generation": 8,
-    "last_used_at": "2026-10-09T20:00:57.778303+00:00",
-    "last_viewed_at": "2026-10-09T20:00:57.772833+00:00",
-    "patch_count": 8,
-    "patch_generation": 8,
-    "pinned": false,
-    "state": "active",
-    "use_count": 32,
-    "view_count": 32
-  },
   "hermes-agent": {
     "archived_at": null,
     "created_at": "2026-09-07T16:49:26.320286+00:00",
     "created_by": null,
-    "last_patched_at": null,
+    "last_patched_at": "2026-10-17T20:29:12.096510+00:00",
     "last_reused_patch_generation": 0,
-    "last_used_at": "2026-10-01T21:46:34.222821+00:00",
-    "last_viewed_at": "2026-10-01T21:46:34.221884+00:00",
-    "patch_count": 0,
-    "patch_generation": 0,
+    "last_used_at": "2026-10-17T20:29:01.979531+00:00",
+    "last_viewed_at": "2026-10-17T20:29:01.978280+00:00",
+    "patch_count": 3,
+    "patch_generation": 3,
     "pinned": false,
     "state": "active",
-    "use_count": 20,
-    "view_count": 20
+    "use_count": 23,
+    "view_count": 23
   },
   "hermes-agent-skill-authoring": {
     "archived_at": null,
