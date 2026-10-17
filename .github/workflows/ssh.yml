@@ -421,6 +421,63 @@ jobs:
             echo '⚠️ hermes/seed-message.txt not found — skipping seed prompt'
           fi
 
+      - name: 13b. Install & restore the reserve service (hall booking, :8080)
+        # /opt/reserve is on the runner's ephemeral disk, so both the install and
+        # the sqlite data are gone after every rebuild. The database is restored
+        # from reserve/data.sqlite committed in this repo (mirrors the way
+        # 9router/data.sqlite is handled in steps 12 and 16).
+        run: |
+          set -euo pipefail
+          TS_IP=$(sudo tailscale ip -4 | head -1)
+          cd "${GITHUB_WORKSPACE:-.}"
+          curl -sSL -o /tmp/reserve-deploy.sh \
+            https://raw.githubusercontent.com/jackjons676-rebecca/reserve/main/deploy.sh
+          sudo bash /tmp/reserve-deploy.sh \
+            --repo https://github.com/jackjons676-rebecca/reserve.git \
+            --ip "$TS_IP" 2>&1 | tail -20
+          echo '✅ reserve installed'
+
+          # Restore the database only on a genuinely fresh install. deploy.sh
+          # already creates an empty reserve.db on first install, so the file's
+          # presence is the reliable "already have data" test — never overwrite a
+          # populated database with the repo copy.
+          REPO_DB="${GITHUB_WORKSPACE:-.}/reserve/data.sqlite"
+          if [ -f "$REPO_DB" ]; then
+            # Refuse an empty/truncated backup rather than installing a shell db
+            # that would look like data loss.
+            NTABLES=$(node -e "
+              const {DatabaseSync} = require('node:sqlite');
+              const d = new DatabaseSync(process.argv[1], { readOnly: true });
+              console.log(d.prepare(\"SELECT count(*) c FROM sqlite_master WHERE type='table'\").get().c);
+              d.close();
+            " "$REPO_DB" 2>/dev/null || echo 0)
+            if [ "${NTABLES:-0}" -lt 5 ]; then
+              echo "⚠️ Repo backup has only ${NTABLES:-0} tables — treating it as invalid, NOT restoring"
+              echo "   (a valid reserve database has 7: bookings halls kinds sessions settings users + sqlite_sequence)"
+            else
+              sudo systemctl stop reserve
+              sudo cp "$REPO_DB" /opt/reserve/data/reserve.db
+              sudo chown runner:runner /opt/reserve/data/reserve.db
+              # Stale WAL/SHM from the fresh install would be replayed over the
+              # restored database and corrupt it.
+              sudo rm -f /opt/reserve/data/reserve.db-wal /opt/reserve/data/reserve.db-shm
+              sudo chmod 600 /opt/reserve/data/reserve.db
+              sudo systemctl start reserve
+              sleep 3
+              echo "✅ Restored reserve.db from the repo backup (${NTABLES} tables)"
+            fi
+          else
+            echo 'ℹ️ No reserve backup in the repo yet — first run starts empty (needsSetup:true)'
+          fi
+
+          for _ in 1 2 3 4 5; do
+            if curl -fsS http://127.0.0.1:8080/api/status >/dev/null 2>&1; then
+              echo "✅ reserve is live: $(curl -fsS http://127.0.0.1:8080/api/status)"
+              break
+            fi
+            sleep 2
+          done
+
       - name: 14. Start Laravel Development Server
         run: |
           cd /home/runner/academy1
@@ -434,7 +491,7 @@ jobs:
             echo "[$i/300] Server is active (SSH + Laravel on port 8000)..."
           done
 
-      - name: 16. Sync hermes state & 9router data back to my-red
+      - name: 16. Sync hermes state, 9router data & reserve database back to my-red
         if: always()
         env:
           GH_TOKEN: ${{ secrets.MY_PAT }}
@@ -470,16 +527,52 @@ jobs:
             echo '✅ Copied 9router data.sqlite → 9router/ for backup'
           fi
 
+          # 2b. Copy the reserve database back to the repo.
+          # The service MUST be stopped first: sqlite in WAL mode keeps recent
+          # writes in reserve.db-wal, and copying only reserve.db would silently
+          # lose the newest bookings. A clean shutdown checkpoints and removes the
+          # -wal file, so the single .db file is then complete.
+          if systemctl list-unit-files reserve.service >/dev/null 2>&1; then
+            sudo systemctl stop reserve || true
+            sleep 2
+            mkdir -p reserve
+            # COPYING reserve.db DIRECTLY IS NOT ENOUGH. The app runs sqlite in
+            # WAL mode, so on a fresh install reserve.db is 4096 bytes and every
+            # table lives in reserve.db-wal (hundreds of KB). Copying the .db
+            # alone silently backs up an EMPTY database.
+            # Verified on this machine: reserve.db -> 0 tables; the VACUUM INTO
+            # output -> 7 tables, 7 halls, integrity ok.
+            sudo chmod 755 /opt/reserve /opt/reserve/data
+            if sudo test -f /opt/reserve/data/reserve.db; then
+              if node -e "
+                const {DatabaseSync} = require('node:sqlite');
+                const db = new DatabaseSync('/opt/reserve/data/reserve.db');
+                db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+                db.exec(\"VACUUM INTO '$PWD/reserve/data.sqlite'\");
+                db.close();
+              " 2>/dev/null; then
+                echo "✅ Backed up reserve database → reserve/data.sqlite ($(stat -c %s reserve/data.sqlite) bytes)"
+              else
+                echo '⚠️ VACUUM INTO failed — reserve/data.sqlite left untouched (never copy the .db directly)'
+              fi
+            else
+              echo '⚠️ /opt/reserve/data/reserve.db not found — nothing to back up'
+            fi
+            sudo systemctl start reserve || true
+          else
+            echo 'ℹ️ reserve.service not installed on this runner — nothing to back up'
+          fi
+
           # 3. Commit & push if anything changed
           if git diff --quiet && git diff --cached --quiet; then
             echo 'ℹ️ No changes to commit'
           else
-            git add hermes/ 9router/ 2>/dev/null || true
-            git commit -m "Sync hermes state & 9router data from academy instance"
+            git add hermes/ 9router/ reserve/ 2>/dev/null || true
+            git commit -m "Sync hermes state, 9router data & reserve database from academy instance"
             # Pull first in case another run pushed before us
             git pull --rebase origin "${{ github.ref_name }}" || true
             git push origin "${{ github.ref_name }}" || echo '⚠️ Push failed — changes saved locally'
-            echo '✅ Hermes & 9router data synced to my-red'
+            echo '✅ Hermes, 9router & reserve data synced to my-red'
           fi
 
       - name: 17. Tailscale Logout (frees the `academy` name for the next run)
