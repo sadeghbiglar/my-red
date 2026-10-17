@@ -486,6 +486,43 @@ jobs:
           nohup php artisan serve --host=0.0.0.0 > /dev/null 2>&1 &
           echo '✅ Laravel server started on port 8000'
 
+      - name: 14b. Development autopilot (one queued issue per boot)
+        # The user asked for uninterrupted progress: on every boot, take the next
+        # issue from .academy/queue.json, implement it, gate on tests + pint,
+        # commit and push to `academy`. `main` is never touched — that stays the
+        # release branch and requires the user's approval.
+        #
+        # Runs AFTER the servers are up so a failure here never costs the
+        # machine; and AFTER the git-based state sync step so the queue file the
+        # agent reads is the freshly-pushed one.
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          SCRIPT=/home/runner/.hermes/skills/academy1-report/scripts/academy-autopilot.sh
+          if [ ! -f "$SCRIPT" ]; then
+            echo "⚠️ autopilot script missing at $SCRIPT — restoring it from the repo"
+            mkdir -p "$(dirname "$SCRIPT")"
+            curl -sSL -o "$SCRIPT" \
+              https://raw.githubusercontent.com/sadeghbiglar/academy1/academy/scripts/academy-autopilot.sh \
+              || { echo "⚠️ could not fetch autopilot script — skipping this run"; exit 0; }
+          fi
+          chmod +x "$SCRIPT"
+          echo "✅ autopilot starting (log: /tmp/autopilot.log)"
+          # Long timeout: one issue can mean many files and a full test cycle.
+          # A slow run that overruns the job must not be silently killed without
+          # leaving a trace, so the log is tailed below.
+          timeout 2400 "$SCRIPT" > /tmp/autopilot.log 2>&1
+          RC=$?
+          echo "--- autopilot log (last 60 lines) ---"
+          tail -60 /tmp/autopilot.log || true
+          if [ $RC -eq 124 ]; then
+            echo "⚠️ autopilot hit its 2400s cap — the issue may be unfinished; the queue keeps it in_progress"
+          elif [ $RC -ne 0 ]; then
+            echo "⚠️ autopilot failed rc=$RC — queue unchanged, will retry next boot"
+          else
+            echo "✅ autopilot completed this boot's issue"
+          fi
+
       - name: 15. Server Keep-Alive (300m)
         run: |
           for i in {1..300}; do
