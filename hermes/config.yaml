@@ -130,7 +130,7 @@ mcp_servers:
   codegraph:
     args:
       - -c
-      - cd /home/runner/h-dashboard && /home/runner/.npm-global/bin/codegraph serve
+      - cd /home/runner/academy1 && /home/runner/.npm-global/bin/codegraph serve
         --mcp
     command: sh
     connect_timeout: 60
@@ -142,7 +142,7 @@ mcp_servers:
   laravel_boost:
     args:
       - -c
-      - cd /home/runner/h-dashboard && php artisan boost:mcp
+      - cd /home/runner/academy1 && php artisan boost:mcp
     command: sh
     env:
       APP_ENV: local

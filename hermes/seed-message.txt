@@ -1,2 +1,2 @@
-cd h-dashboard
+cd academy1
 خلاصه گزارش وضعیت رو بگو

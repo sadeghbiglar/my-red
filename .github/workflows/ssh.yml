@@ -5,6 +5,18 @@ on:
     - cron: '0 */6 * * *'
   workflow_dispatch:
 
+# Only ONE academy machine may exist at any moment. Without this, a manual
+# dispatch overlapping a scheduled run produced two runners, both joining with
+# --hostname=academy, and Tailscale resolved the name clash by registering the
+# second one as `academy-1`.
+#
+# cancel-in-progress: false => a run that arrives while another is live QUEUES
+# instead of starting a parallel runner. Set true only if you want a manual
+# dispatch to kill the live machine on purpose.
+concurrency:
+  group: academy-machine
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -78,12 +90,69 @@ jobs:
           sudo php composer-setup.php --install-dir=/usr/local/bin --filename=composer
           php -r "unlink('composer-setup.php');"
 
+      - name: 4b. Purge stale Tailscale nodes named academy / academy-N
+        # An ephemeral runner that dies before step 17 (`tailscale logout`)
+        # leaves its node registered in the tailnet. Tailscale then hands the
+        # next runner `academy-1`, `academy-2`, ... Every leftover node matching
+        # this workflow's name is deleted here BEFORE we join, so the fresh
+        # runner always gets the plain name.
+        #
+        # Needs the secret TAILSCALE_API_KEY. Create it in Tailscale ->
+        # Settings -> API keys (write access is NOT required for DELETE).
+        # If the secret is absent the step is skipped and the run continues.
+        env:
+          TAILSCALE_API_KEY: ${{ secrets.TAILSCALE_API_KEY }}
+          WF_NAME: ${{ env.WF_NAME }}
+        run: |
+          if [ -z "$TAILSCALE_API_KEY" ]; then
+            echo "⚠️ TAILSCALE_API_KEY secret not set — skipping stale-node purge."
+            echo "   Stale nodes will keep claiming the academy name."
+            exit 0
+          fi
+          cat > /tmp/purge_stale_ts.py <<'PYEOF'
+          import json, os, sys, urllib.request
+
+          wf = os.environ["WF_NAME"]
+          key = os.environ["TAILSCALE_API_KEY"]
+          req = urllib.request.Request(
+              "https://api.tailscale.com/api/v2/tailnet/-/devices",
+              headers={"Authorization": "Bearer " + key})
+          try:
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  devs = json.load(r).get("devices") or []
+          except Exception as exc:
+              print("WARN:" + str(exc))
+              sys.exit(0)
+          for d in devs:
+              name = (d.get("name") or "").split(".")[0]
+              suffix = name[len(wf) + 1:]
+              if name == wf or (name.startswith(wf + "-") and suffix.isdigit()):
+                  print(d.get("id", ""))
+          PYEOF
+          DEVICE_IDS=$(python3 /tmp/purge_stale_ts.py | grep -v '^WARN:' | grep -v '^$' || true)
+          if [ -z "$DEVICE_IDS" ]; then
+            echo 'ℹ️ No stale academy node found — the name is free.'
+          fi
+          for id in $DEVICE_IDS; do
+            if curl -fsS -X DELETE -H "Authorization: Bearer $TAILSCALE_API_KEY" "https://api.tailscale.com/api/v2/device/$id" >/dev/null; then
+              echo "✅ Deleted stale Tailscale node $id"
+            else
+              echo "⚠️ Failed to delete node $id"
+            fi
+          done
+
       - name: 5. Connect Tailscale as Exit Node & Show Access Info
         env:
           TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
         run: |
           curl -fsSL https://tailscale.com/install.sh | sh
           sudo tailscale up --authkey="$TAILSCALE_AUTHKEY" --hostname="${{ env.WF_NAME }}" --advertise-exit-node --accept-routes --accept-dns
+          ACTUAL=$(sudo tailscale status --json 2>/dev/null | python3 -c "import json,sys;print((json.load(sys.stdin).get('Self') or {}).get('HostName',''))" 2>/dev/null || echo '')
+          if [ "$ACTUAL" != "$WF_NAME" ]; then
+            echo "❌ Joined as '$ACTUAL' instead of '$WF_NAME' — a stale node is still holding the name."
+            exit 1
+          fi
+          echo "✅ Joined Tailscale as exactly '$ACTUAL'"
 
           # Enable IP forwarding (required for exit node to route traffic)
           echo 'net.ipv4.ip_forward = 1' | sudo tee -a /etc/sysctl.conf
@@ -136,6 +205,9 @@ jobs:
           echo "✅ Branch ${WF_NAME} created/reset from origin/beta"
 
           cp .env.example.mysql .env
+          # .env.example.mysql ships APP_KEY= empty, so every fresh ephemeral
+          # runner booted with MissingAppKeyException. Generate it here.
+          php artisan key:generate --force
 
           # .hermes.md is not wanted — AGENTS.md is the authoritative instruction
           # file. Drop it from the checkout and from the index (without touching
@@ -237,6 +309,15 @@ jobs:
           for item in memories skills cron hooks platforms sessions kanban; do
             [ -d "$H/$item" ] && cp -r "$H/$item" "$D/"
           done
+          # The repo copy of config.yaml must never point at a dead repo path:
+          # a stale `cd /home/runner/h-dashboard` makes every MCP server fail to
+          # start and looks like a broken tool.
+          if [ -f "$D/config.yaml" ]; then
+            sed -i 's|/home/runner/h-dashboard|/home/runner/academy1|g' "$D/config.yaml"
+            echo '✅ config.yaml MCP paths forced to /home/runner/academy1'
+          fi
+          # h-dashboard is retired — drop its skill if an old copy rides along.
+          rm -rf "$D/skills/h-dashboard-session"
           for f in SOUL.md config.yaml kanban.db channel_directory.json \
                    gateway_state.json .skills_prompt_snapshot.json; do
             [ -f "$H/$f" ] && cp "$H/$f" "$D/"
@@ -365,6 +446,10 @@ jobs:
           for item in memories skills cron hooks platforms sessions kanban; do
             [ -d "$H/$item" ] && cp -r "$H/$item" "$HDEST/"
           done
+          rm -rf "$HDEST/skills/h-dashboard-session"
+          if [ -f "$HDEST/config.yaml" ]; then
+            sed -i 's|/home/runner/h-dashboard|/home/runner/academy1|g' "$HDEST/config.yaml"
+          fi
           for f in SOUL.md kanban.db state.db channel_directory.json \
                    gateway_state.json .skills_prompt_snapshot.json; do
             [ -f "$H/$f" ] && cp "$H/$f" "$HDEST/"
