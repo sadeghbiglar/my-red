@@ -204,12 +204,14 @@ jobs:
           git config user.name "sadeghbiglar/"
           git config user.email "sadeghbiglar/@users.noreply.github.com"
 
-          # Fetch latest origin/beta
-          git fetch origin beta
+          # `main` is the release branch: approved work lands there and this is
+          # what every ephemeral boot must start from. Basing on `beta` meant
+          # `git checkout -B academy origin/beta` threw away any commit made on
+          # the academy branch since the last runner rebuild.
+          git fetch origin main
 
-          # Create / reset WF_NAME branch from origin/beta
-          git checkout -B "${WF_NAME}" origin/beta
-          echo "✅ Branch ${WF_NAME} created/reset from origin/beta"
+          git checkout -B "${WF_NAME}" origin/main
+          echo "✅ Branch ${WF_NAME} created/reset from origin/main (tree $(git rev-parse --short HEAD))"
 
           cp .env.example.mysql .env
           # .env.example.mysql ships APP_KEY= empty, so every fresh ephemeral
