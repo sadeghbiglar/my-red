@@ -263,27 +263,48 @@ curl -s -X PUT \
 
 ## 6. Branch Protection
 
-```bash
-# View current protection
-curl -s \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$OWNER/$REPO/branches/main/protection
+Use protection to make an approval gate real rather than advisory: it is the only
+mechanism that makes "after I approve, it goes to main" enforceable even against
+the agent's own push access.
 
-# Set up branch protection
-curl -s -X PUT \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$OWNER/$REPO/branches/main/protection \
-  -d '{
-    "required_status_checks": {
-      "strict": true,
-      "contexts": ["ci/test", "ci/lint"]
-    },
-    "enforce_admins": false,
-    "required_pull_request_reviews": {
-      "required_approving_review_count": 1
-    },
-    "restrictions": null
-  }'
+**Write the payload to a JSON file and pass `--input`.** Building this with `gh api
+-f` flags does not work: `-f restrictions=null` sends the *string* `"null"`, and the
+endpoint rejects it with a schema error ("For 'allOf/0', \"null\" is not an
+object"). JSON null must come from a real JSON document.
+
+```bash
+cat > /tmp/protection.json <<'JSON'
+{
+  "required_status_checks": null,
+  "enforce_admins": true,
+  "required_pull_request_reviews": {
+    "required_approving_review_count": 1,
+    "dismiss_stale_reviews": true
+  },
+  "restrictions": null,
+  "required_linear_history": false,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "block_creations": false,
+  "required_conversation_resolution": true,
+  "lock_branch": false,
+  "allow_fork_syncing": true
+}
+JSON
+
+gh api -X PUT repos/OWNER/REPO/branches/main/protection \\
+  --input /tmp/protection.json \\
+  --jq '{url, reviews: .required_pull_request_reviews.required_approving_review_count, admins: .enforce_admins.enabled, force: .allow_force_pushes.enabled}'
+```
+
+Read the response back and confirm each field you care about — `enforce_admins` is
+the one that decides whether the protection applies to a machine with admin rights
+such as your own token. Drop `"required_status_checks"` keys entirely (not `null`)
+when there are no status checks configured, or the PUT fails validation.
+
+Read current state with:
+```bash
+gh api repos/OWNER/REPO/branches/main/protection
 ```
 
 ## 7. Secrets Management (GitHub Actions)

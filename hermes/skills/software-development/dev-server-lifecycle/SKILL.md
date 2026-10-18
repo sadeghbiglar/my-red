@@ -167,6 +167,165 @@ http://<hostname>:8000/      -> 200
 State which URL was proven and how (curl status, or a real browser interaction). If an
 interactive control was exercised, say so; a served route does not prove a working UI.
 
+## 7. A service's state is part of the service — verify the backup, not the copy
+
+A server that restarts with an empty database looks like it crashed, not like data
+loss. Before promising that state survives anything (rebuild, redeploy, new machine),
+prove a **restore** works. Copying a file is not backing up state.
+
+### Never copy a WAL-mode sqlite database by hand
+
+In WAL mode the committed rows live in `<db>-wal` until a checkpoint. The main file can
+be a few KB with **zero tables** while `-wal` holds hundreds of KB of real data:
+
+```
+app.db        4096 bytes   <- 0 tables, PRAGMA integrity_check says "ok"
+app.db-wal  304912 bytes   <- every table and row is in here
+```
+
+`cp app.db backup.db` therefore produces a **valid-looking empty database**. It does
+not error, it passes an integrity check, and it restores "successfully" — and all the
+data is gone. Size the two files side by side before trusting any copy.
+
+Produce a self-contained snapshot with a checkpoint plus `VACUUM INTO`:
+
+```bash
+node -e "
+const {DatabaseSync} = require('node:sqlite');
+const db = new DatabaseSync('/path/app.db');
+db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+db.exec(\"VACUUM INTO '/path/backup.db'\");
+db.close();
+" 2>/dev/null
+```
+
+(Use `sqlite3 app.db ".backup out.db"` when the `sqlite3` CLI is available.)
+
+### Validate a restore by counting the schema, not by checking the file exists
+
+`[ -f backup.db ]` proves nothing — an empty shell passes it. Open the candidate and
+assert it has the expected objects before installing it over a live database:
+
+```bash
+node -e "
+const {DatabaseSync} = require('node:sqlite');
+const d = new DatabaseSync(process.argv[1], { readOnly: true });
+console.log(d.prepare(\"SELECT count(*) c FROM sqlite_master WHERE type='table'\").get().c);
+d.close();
+" "$CANDIDATE"
+```
+
+Refuse anything below the expected table count and leave the running service alone.
+
+### Kill the service before a restore, and delete the stale sidecars
+
+Two rules that make a restore silently corrupt:
+
+- **Stop the app first.** Copying files out from under a live writer captures a torn
+  moment, not a consistent snapshot.
+- **Delete `<db>-wal` and `<db>-shm` after overwriting the `.db`.** Sidecars from the
+  previous generation get replayed over the restored file and undo it. Leftover `-wal`
+  is how a correct restore still comes back empty.
+
+### State on a disposable machine needs a commit step, and so does its repo
+
+If the machine rebuilds (ephemeral CI runner, container, cloud instance), in-place
+state is destroyed on every cycle. The backup must be written somewhere that survives —
+committed to a repo, pushed to object storage — from a teardown step that actually
+runs. Check that the teardown step is reachable: a step gated on `if: always()` does
+**not** run when the job is killed at `timeout-minutes`, so leave real headroom between
+a keep-alive loop and the job timeout, or the backup silently never happens.
+
+Flag where that backup lands before pushing. A backup repo that is public, or a
+snapshot containing credential hashes and live session tokens, is a disclosure even
+when the data is only a test project — name the exposure in one or two sentences, then
+respect the user's decision rather than re-litigating it.
+
+### Before handing back a credential-creation step, look for a root cause that needs none
+
+On a disposable machine, "the cleanup step needs an API token, so create this secret"
+looks like the honest report — and it is often the wrong one. A leaked identity, a
+duplicate registration, a name that keeps getting a numeric suffix: these are usually
+*symptoms* of a step that never runs, and the missing credential only papers over it.
+
+Sequence to follow before proposing any new secret, key, or token to the user:
+
+1. Explain the failure with one level of mechanism: what registered, what claimed the
+   name, what was supposed to release it.
+2. Find the step whose absence causes it, and ask **why that step did not run** —
+   gating condition, ordering, timeout, exit path.
+3. Fix that. Most such "I need a token" situations disappear entirely.
+4. Only if a genuinely external cause remains (a node deleted by someone else, a
+   credential expired) offer the token — and then it is belt-and-braces, clearly
+   labelled as such, not the fix.
+
+**Rule:** never present a manual step as required while an uninvestigated root cause
+remains. Say what you could not do yourself (a console login, a password prompt — never
+type or request those), fix everything that does not need it, and label the rest
+optional with the condition that would make it necessary. A hand-off also reads as
+"stop here", which is a claim about your capability that is often wrong.
+
+## Pinning an identity that a disposable machine claims repeatedly
+
+A machine that rebuilds on a timer and registers a named identity (a VPN/tailnet node,
+a device cert, a cloud instance name) accumulates stale registrations: a node that dies
+before its cleanup step leaves its identity claimed, and the identity service resolves
+the clash by appending a suffix. The user then sees `thing-1`, `thing-2` and concludes
+their setup is broken.
+
+Three layers, cheapest first, and expect layer 1 to be the actual fix:
+
+1. **Guarantee the cleanup step runs.** A teardown gated on `if: always()` does NOT run
+   when the job is killed at `timeout-minutes`, and a keep-alive loop whose length equals
+   the job timeout guarantees the kill lands exactly as that loop ends. Keep-alive must
+   sit below `timeout-minutes` with real headroom; then verify in the teardown that the
+   identity is actually gone.
+2. **Serialize the runs.** A concurrency group makes a second run queue instead of
+   starting a parallel claimant. On a self-hosted CI or scheduler this is the equivalent
+   of `flock` around the whole run — it also fixes the case where a manual trigger
+   overlaps a scheduled one.
+3. **Sweep stale registrations.** Only for leaks from outside the run (someone deleted
+   the machine mid-cycle). This is the layer that needs an API credential, so it goes
+   last, and it should match strictly — `name` and `name-<digits>`, never a loose prefix
+   that also catches unrelated nodes. Test the matcher against a stubbed response before
+   trusting it.
+
+Make the run fail loudly rather than silently if the identity it got is not the one it
+asked for: an assertion at join time turns a confusing `thing-7` into an immediate,
+readable failure.
+
+## Installing a service from someone else's install script
+
+`curl -sSL <url> | sudo bash` hands the machine to a stranger with root and no
+reviewable artifact. When the user hands you that command, do not run it piped —
+download it, read it, then run the local copy:
+
+```bash
+curl -sSL -o /tmp/install.sh <url>
+sha256sum /tmp/install.sh && wc -l /tmp/install.sh    # something quotable in the report
+less /tmp/install.sh                                    # or read_file
+sudo bash /tmp/install.sh --flags
+```
+
+Read for the things that decide whether it is safe to run with root:
+
+- **What it writes and where** — install dir, systemd units, firewall rules, config.
+- **What it deletes** — any `rm -rf`, especially on a path derived from a variable.
+- **Where credentials go** — does it write a secret into a repo-tracked file, a
+  world-readable mode, or a log line that gets echoed?
+- **Whether it is idempotent** — re-running it later must not wipe state, because you
+  will re-run it on the next rebuild.
+- **Whether it overwrites data it did not create** — a script that clobbers an existing
+  install is a different decision from one that only fills an empty dir.
+
+Then verify the result instead of trusting the script's own success message: confirm
+the service is active, probe a real route for the expected status, and locate the data
+directory and its persistence story (§7). Report what the install actually wrote.
+
+Note in your report any honest caveat the script itself printed (for example, running
+without HTTPS means credentials travel unencrypted) so the user can decide whether it
+matters for this deployment rather than discovering it in production.
+
 ## Admitting the cause when you caused it
 
 If an outage traces to your own earlier command, say so in the first line and name the

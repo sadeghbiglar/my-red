@@ -20,6 +20,7 @@ Pitfalls and procedures for everyday git operations that fall outside standard
 - Always check `git status` and `git remote -v` before staging or pushing.
 - Configure per-repo identity before first commit if global config is absent.
 - Never assume a branch name — read it from `git branch --show-current`.
+- Do not merge the work branch into the release branch locally to "deliver" a change when the user asked to approve first. That is what a PR is for; state the PR as the next step and stop.
 - Inspect `git status --short` and the relevant diff at startup. Treat pre-existing changes as user-owned: do not stage, discard, or claim them as task work.
 - Verify the current branch's upstream is the remote branch with the **same name**. A status line such as `branch...origin/beta` proves synchronization with the wrong branch, not delivery of the current branch.
 
@@ -82,6 +83,94 @@ Three responses, in order of preference:
 3. **Force-push** — last resort. It deletes the other session's commits from the remote. Get explicit user confirmation naming what will be lost.
 
 **Do not `git rebase` onto the divergent remote to "fix" a non-fast-forward.** If the local branch carries many upstream commits, the rebase replays all of them and conflicts on whichever doc or lockfile those commits touched. `git rebase --abort` restores state exactly; the branch you started from is still there.
+
+## Establishing A Release Branch And A Working Branch
+
+The request is usually "make the release branch cover everything on the work branch, and
+from now on land work on the work branch and promote it only after I approve". Build it
+in this order, and expect the release branch to already diverge.
+
+### Prove the divergence carries no content before you touch anything
+
+A release branch commonly holds a merge commit (a PR merge) that the work branch does
+not, so fast-forward is impossible even when the release branch has nothing the work
+branch lacks. Compare **tree** hashes, not commit SHAs — a merge commit has its own SHA
+but frequently the same tree as an ancestor:
+
+```bash
+git merge-base --is-ancestor origin/main work && echo "ff possible" || echo "DIVERGED"
+git rev-parse origin/main^{tree} work~1^{tree}   # equal trees => the merge only synced a base branch
+```
+
+Equal trees mean merging the release branch in is a no-op for content and the result
+pushes without force:
+
+```bash
+git merge origin/main --no-edit
+git diff --stat <old-work-sha> HEAD     # must be EMPTY: the merge changed no file
+git merge-base --is-ancestor origin/main HEAD && echo "plain push now works"
+git push origin HEAD:refs/heads/main
+```
+
+Verify delivery by tree, not by eyeballing the diff:
+
+```bash
+git rev-parse HEAD^{tree} origin/main^{tree}   # must be identical
+git ls-remote --heads origin                  # what the remote really holds
+```
+
+Non-empty `git diff --stat` means the release branch holds real content the work branch
+lacks — stop and report it instead of merging blind.
+
+### Protect the release branch so approval is a mechanism, not a promise
+
+Unprotected, "after I approve" is only your own discipline. Protect it:
+
+```bash
+cat > /tmp/protection.json <<'JSON'
+{
+  "required_status_checks": null,
+  "enforce_admins": true,
+  "required_pull_request_reviews": {
+    "required_approving_review_count": 1,
+    "dismiss_stale_reviews": true
+  },
+  "restrictions": null,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "required_conversation_resolution": true
+}
+JSON
+gh api -X PUT repos/<owner>/<repo>/branches/<release>/protection \
+  --input /tmp/protection.json --jq '{reviews:.required_pull_request_reviews.required_approving_review_count, admins:.enforce_admins.enabled}'
+```
+
+**The `-f`/`-F` flag form of this call does not work** — nested keys like
+`required_pull_request_reviews[required_approving_review_count]` and the
+`restrictions=null` / `required_status_checks=null` fields produce
+`422 ... "null" is not a null ... (HTTP 422)`. Write the JSON to a file and use
+`--input`; verify the response echoes `required_approving_review_count`.
+
+Consequence to state plainly in the report: after this, a direct `git push origin main`
+is rejected **by design**, and so is your own push. The promotion path is a PR.
+
+### A CI bootstrap that hard-resets a working branch destroys commits
+
+A provisioning workflow that recreates the checkout (`git checkout -B <branch>
+origin/<base>`, `git clone` into a fresh dir, `git reset --hard origin/<base>`) discards
+every commit made on that branch since the last rebuild. On a machine that rebuilds on a
+timer, work committed there is gone within one cycle, silently.
+
+The base must be the **release** branch, not a stale sibling:
+
+```bash
+git fetch origin main
+git checkout -B work origin/main      # NOT origin/<other-feature-branch>
+```
+
+When auditing such a workflow, also check the branch's tracking config. A work branch
+tracking a differently-named remote branch means a bare `git push` writes to the wrong
+ref — repair it with `git branch --set-upstream-to=origin/<work> <work>`.
 
 ## Making A Branch Exactly Match A Canonical Branch
 

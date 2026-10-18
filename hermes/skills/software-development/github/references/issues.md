@@ -285,6 +285,59 @@ git checkout main && git pull origin main
 git checkout -b fix/issue-42-login-redirect
 ```
 
+## 3b. Bulk Creation From a Plan (dozens of issues at once)
+
+Registering a roadmap means creating many issues with milestone assignment. Two
+failure modes cost real time, both avoidable.
+
+**Milestones are addressed by TITLE, not number.** `--milestone` takes the title
+string; a number silently creates the issue with no milestone.
+
+```bash
+# 1. Create milestones first and capture the numbers
+gh api -X POST repos/OWNER/REPO/milestones -f title="M0 foundation" \\
+  -f description="..." --jq .number
+
+# 2. Map your plan's short keys -> titles, and keep that map. It is the only
+#    thing that ties issue N to milestone M after a partial run.
+# 3. One issue per call, body from a FILE (never inline: markdown + backticks +
+#    non-Latin text do not survive shell quoting)
+gh issue create --repo OWNER/REPO \\
+  --title "$title" --body-file /tmp/bodies/07.md \\
+  --milestone "M0 foundation"
+```
+
+**Verify the count you created against the count you planned.** A loop driven from
+a tool-call-limited harness silently truncates partway through, and the run looks
+successful because every individual call exited 0. Re-read the list afterwards and
+diff it against the plan:
+
+```bash
+gh api "repos/OWNER/REPO/issues?state=all&per_page=100" \\
+  --jq '.[] | select(.pull_request|not) | "\(.number)\t\(.milestone.title // "-")\t\(.title)"'
+```
+
+Anything in the plan missing from that output was never created — issue it, do not
+assume. `gh issue list --limit N --json number --jq length` returns only what fits
+in one page; for a reliable census paginate with `gh api ...?per_page=100&page=N`
+and filter out pull requests, because `/issues` returns PRs too.
+
+**Existing issues with no milestone get assigned in bulk afterwards** rather than
+being rewritten during creation:
+```bash
+gh issue edit 42 --repo OWNER/REPO --milestone "M1 students"
+```
+
+**Never nest `gh --jq` inside a Python string.** `--jq '.[] | "\(.number)"'`
+inside a Python heredoc mangles the backslash escapes and fails with a jq parse
+error that looks like a GitHub problem. Write the loop to a shell file with
+`write_file` and run `bash file.sh` — jq quoting survives intact.
+
+**When porcelain or GraphQL fails, fall back to REST.** `gh issue list` resolves
+repos through GraphQL and can fail with `Could not resolve to a Repository` while
+`gh repo view` and `gh api` succeed against the same repo. Try the REST endpoint
+before concluding anything is wrong with auth or the repo.
+
 ## 4. Issue Triage Workflow
 
 When asked to triage issues:
