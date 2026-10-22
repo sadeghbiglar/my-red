@@ -204,14 +204,14 @@ jobs:
           git config user.name "sadeghbiglar/"
           git config user.email "sadeghbiglar/@users.noreply.github.com"
 
-          # `main` is the release branch: approved work lands there and this is
+          # `beta` is the release branch: approved work lands there and this is
           # what every ephemeral boot must start from. Basing on `beta` meant
           # `git checkout -B academy origin/beta` threw away any commit made on
           # the academy branch since the last runner rebuild.
-          git fetch origin main
+          git fetch origin beta
 
-          git checkout -B "${WF_NAME}" origin/main
-          echo "✅ Branch ${WF_NAME} created/reset from origin/main (tree $(git rev-parse --short HEAD))"
+          git checkout -B "${WF_NAME}" origin/beta
+          echo "✅ Branch ${WF_NAME} created/reset from origin/beta (tree $(git rev-parse --short HEAD))"
 
           cp .env.example.mysql .env
           # .env.example.mysql ships APP_KEY= empty, so every fresh ephemeral
@@ -433,7 +433,7 @@ jobs:
           TS_IP=$(sudo tailscale ip -4 | head -1)
           cd "${GITHUB_WORKSPACE:-.}"
           curl -sSL -o /tmp/reserve-deploy.sh \
-            https://raw.githubusercontent.com/jackjons676-rebecca/reserve/main/deploy.sh
+            https://raw.githubusercontent.com/jackjons676-rebecca/reserve/beta/deploy.sh
           sudo bash /tmp/reserve-deploy.sh \
             --repo https://github.com/jackjons676-rebecca/reserve.git \
             --ip "$TS_IP" 2>&1 | tail -20
@@ -489,7 +489,7 @@ jobs:
       - name: 14b. Development autopilot (one queued issue per boot)
         # The user asked for uninterrupted progress: on every boot, take the next
         # issue from .academy/queue.json, implement it, gate on tests + pint,
-        # commit and push to `academy`. `main` is never touched — that stays the
+        # commit and push to `academy`. `beta` is never touched — that stays the
         # release branch and requires the user's approval.
         #
         # Runs AFTER the servers are up so a failure here never costs the
