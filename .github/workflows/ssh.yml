@@ -214,9 +214,12 @@ jobs:
           echo "✅ Branch ${WF_NAME} created/reset from origin/academy (tree $(git rev-parse --short HEAD))"
 
           cp .env.example.mysql .env
-          # .env.example.mysql ships APP_KEY= empty, so every fresh ephemeral
-          # runner booted with MissingAppKeyException. Generate it here.
-          php artisan key:generate --force
+          # .env.example.mysql ships a pre-filled APP_KEY (same convention as
+          # h-dashboard's .env.example.pgsql), so there is deliberately NO
+          # `php artisan key:generate` here: artisan requires
+          # vendor/autoload.php, which does not exist before step 9's
+          # `composer update`. Calling it at this point fataled every fresh
+          # boot with exit 255 before Docker/Composer ever ran.
 
           # .hermes.md is not wanted — AGENTS.md is the authoritative instruction
           # file. Drop it from the checkout and from the index (without touching
@@ -263,6 +266,7 @@ jobs:
 
       - name: 11. Install 9router globally and create symlink
         run: |
+          npm install -g wreq-js
           npm install -g 9router
           if [ -f ~/.npm-global/bin/9router ]; then
             sudo ln -sf ~/.npm-global/bin/9router /usr/local/bin/9router
