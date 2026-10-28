@@ -437,7 +437,7 @@ jobs:
           TS_IP=$(sudo tailscale ip -4 | head -1)
           cd "${GITHUB_WORKSPACE:-.}"
           curl -sSL -o /tmp/reserve-deploy.sh \
-            https://raw.githubusercontent.com/jackjons676-rebecca/reserve/academy/deploy.sh
+            https://raw.githubusercontent.com/jackjons676-rebecca/reserve/main/deploy.sh
           sudo bash /tmp/reserve-deploy.sh \
             --repo https://github.com/jackjons676-rebecca/reserve.git \
             --ip "$TS_IP" 2>&1 | tail -20
@@ -493,8 +493,8 @@ jobs:
       - name: 14b. Development autopilot (one queued issue per boot)
         # The user asked for uninterrupted progress: on every boot, take the next
         # issue from .academy/queue.json, implement it, gate on tests + pint,
-        # commit and push to `academy`. `academy` is never touched — that stays the
-        # release branch and requires the user's approval.
+        # commit and push to `academy`. `main` and `beta` are never touched —
+        # those are the release branches and require the user's approval.
         #
         # Runs AFTER the servers are up so a failure here never costs the
         # machine; and AFTER the git-based state sync step so the queue file the
@@ -610,7 +610,17 @@ jobs:
           if git diff --quiet && git diff --cached --quiet; then
             echo 'ℹ️ No changes to commit'
           else
-            git add hermes/ 9router/ reserve/ 2>/dev/null || true
+            # `git add` aborts atomically on a pathspec that matches nothing:
+            # if `reserve/` is absent (step 13b failed, or no VACUUM backup has
+            # been written yet) the old one-liner `git add hermes/ 9router/
+            # reserve/` failed as a whole, staged nothing, and the commit below
+            # errored — masking the real earlier failure. Add only the
+            # directories that exist.
+            for d in hermes 9router reserve; do
+              if [ -d "$d" ]; then
+                git add "$d"
+              fi
+            done
             git commit -m "Sync hermes state, 9router data & reserve database from academy instance"
             # Pull first in case another run pushed before us
             git pull --rebase origin "${{ github.ref_name }}" || true
