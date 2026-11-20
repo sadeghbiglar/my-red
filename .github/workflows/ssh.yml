@@ -606,6 +606,19 @@ jobs:
             echo 'ℹ️ reserve.service not installed on this runner — nothing to back up'
           fi
 
+          # 2c. Redact anything token-shaped before it can reach a public repo.
+          # GitHub Push Protection scans the WHOLE push: one PAT inside
+          # hermes/state.db (it stores verbatim tool output) made GitHub reject
+          # the entire sync with GH013, so no backup at all landed — that is how
+          # the reserve bookings were lost. Scrub here so the push can never be
+          # blocked by our own state. Byte-preserving, safe on sqlite files.
+          if [ -f .github/scripts/scrub-secrets.mjs ]; then
+            node .github/scripts/scrub-secrets.mjs hermes 9router reserve \
+              || echo '⚠️ scrub-secrets reported a problem — push may be rejected'
+          else
+            echo '⚠️ .github/scripts/scrub-secrets.mjs missing — pushing unscrubbed'
+          fi
+
           # 3. Commit & push if anything changed
           if git diff --quiet && git diff --cached --quiet; then
             echo 'ℹ️ No changes to commit'
@@ -624,8 +637,16 @@ jobs:
             git commit -m "Sync hermes state, 9router data & reserve database from academy instance"
             # Pull first in case another run pushed before us
             git pull --rebase origin "${{ github.ref_name }}" || true
-            git push origin "${{ github.ref_name }}" || echo '⚠️ Push failed — changes saved locally'
-            echo '✅ Hermes, 9router & reserve data synced to my-red'
+            # A rejected push (e.g. GH013 from push protection) used to be
+            # swallowed here and then reported as a success. Fail loudly: the
+            # runner is destroyed after this job, so a push that did not land
+            # means the backups are gone.
+            if git push origin "${{ github.ref_name }}"; then
+              echo '✅ Hermes, 9router & reserve data synced to my-red'
+            else
+              echo '❌ PUSH FAILED — these backups exist ONLY on this runner and will be lost'
+              exit 1
+            fi
           fi
 
       - name: 17. Tailscale Logout (frees the `academy` name for the next run)
