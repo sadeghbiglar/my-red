@@ -34,6 +34,87 @@
       },
       "installed_at": "2026-09-09T10:14:13.839117+00:00",
       "updated_at": "2026-09-09T10:14:13.839117+00:00"
+    },
+    "opencode": {
+      "source": "official",
+      "identifier": "official/autonomous-ai-agents/opencode",
+      "trust_level": "builtin",
+      "scan_verdict": "backfilled",
+      "content_hash": "sha256:c0273d8266b0cdb9",
+      "install_path": "autonomous-ai-agents/opencode",
+      "files": [
+        "SKILL.md"
+      ],
+      "metadata": {
+        "backfilled_from": "optional-skills"
+      },
+      "installed_at": "2026-11-20T05:57:04.784477+00:00",
+      "updated_at": "2026-11-20T05:57:04.784477+00:00"
+    },
+    "design-md": {
+      "source": "official",
+      "identifier": "official/creative/design-md",
+      "trust_level": "builtin",
+      "scan_verdict": "backfilled",
+      "content_hash": "sha256:4a0a7a757630dc24",
+      "install_path": "creative/design-md",
+      "files": [
+        "SKILL.md",
+        "templates/starter.md"
+      ],
+      "metadata": {
+        "backfilled_from": "optional-skills"
+      },
+      "installed_at": "2026-11-20T05:57:04.816527+00:00",
+      "updated_at": "2026-11-20T05:57:04.816527+00:00"
+    },
+    "gif-search": {
+      "source": "official",
+      "identifier": "official/media/gif-search",
+      "trust_level": "builtin",
+      "scan_verdict": "backfilled",
+      "content_hash": "sha256:c52e93aa81099829",
+      "install_path": "media/gif-search",
+      "files": [
+        "SKILL.md"
+      ],
+      "metadata": {
+        "backfilled_from": "optional-skills"
+      },
+      "installed_at": "2026-11-20T05:57:04.819587+00:00",
+      "updated_at": "2026-11-20T05:57:04.819587+00:00"
+    },
+    "songsee": {
+      "source": "official",
+      "identifier": "official/media/songsee",
+      "trust_level": "builtin",
+      "scan_verdict": "backfilled",
+      "content_hash": "sha256:2cb6f1b3d64e8141",
+      "install_path": "media/songsee",
+      "files": [
+        "SKILL.md"
+      ],
+      "metadata": {
+        "backfilled_from": "optional-skills"
+      },
+      "installed_at": "2026-11-20T05:57:04.819959+00:00",
+      "updated_at": "2026-11-20T05:57:04.819959+00:00"
+    },
+    "llm-wiki": {
+      "source": "official",
+      "identifier": "official/research/llm-wiki",
+      "trust_level": "builtin",
+      "scan_verdict": "backfilled",
+      "content_hash": "sha256:39cea7fa9481cfea",
+      "install_path": "research/llm-wiki",
+      "files": [
+        "SKILL.md"
+      ],
+      "metadata": {
+        "backfilled_from": "optional-skills"
+      },
+      "installed_at": "2026-11-20T05:57:04.824103+00:00",
+      "updated_at": "2026-11-20T05:57:04.824103+00:00"
     }
   }
 }

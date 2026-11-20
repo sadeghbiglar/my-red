@@ -261,7 +261,7 @@ mcp_servers:
     command: "npx"
     args: ["-y", "@modelcontextprotocol/server-github"]
     env:
-      GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_xxxxxxxxxxxxxxxxxxxx"
+      GITHUB_PERSONAL_ACCESS_TOKEN: "xxxxxxxxxxxxxxxxxxxxxxxx"
     timeout: 60
 ```
 
@@ -274,7 +274,7 @@ mcp_servers:
   company_api:
     url: "https://mcp.mycompany.com/v1/mcp"
     headers:
-      Authorization: "Bearer sk-xxxxxxxxxxxxxxxxxxxx"
+      Authorization: "Bearer xxxxxxxxxxxxxxxxxxxxxxx"
       X-Team-Id: "engineering"
     timeout: 180
     connect_timeout: 30
@@ -296,12 +296,12 @@ mcp_servers:
     command: "npx"
     args: ["-y", "@modelcontextprotocol/server-github"]
     env:
-      GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_xxxxxxxxxxxxxxxxxxxx"
+      GITHUB_PERSONAL_ACCESS_TOKEN: "xxxxxxxxxxxxxxxxxxxxxxxx"
 
   company_api:
     url: "https://mcp.internal.company.com/mcp"
     headers:
-      Authorization: "Bearer sk-xxxxxxxxxxxxxxxxxxxx"
+      Authorization: "Bearer xxxxxxxxxxxxxxxxxxxxxxx"
     timeout: 300
 ```
 
