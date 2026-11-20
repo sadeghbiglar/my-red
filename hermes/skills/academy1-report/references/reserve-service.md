@@ -36,12 +36,36 @@ when the running major is lower.
 the service if it is down. It only restarts when HTTP != 200, so a healthy service is
 never bounced. sudo is passwordless here.
 
-## Persistence: DONE (my-red commit 6e9ea19)
-The database now survives runner rebuilds, committed to the **public** `my-red` repo
-at `reserve/data.sqlite`. The user explicitly accepted that (test project). Note this
-repo also already tracks `9router/data.sqlite`, `hermes/state.db`, `hermes/cron/*.db`,
-and the reserve db holds scrypt `pin_salt`/`pin_hash` for admins plus live session
-tokens.
+## Persistence: wiring exists, but it never actually landed a backup until 2026-11-20
+The mechanism (workflow step 13b restore + step 16 `VACUUM INTO` backup, commit
+6e9ea19) was written on 2026-10-17 and looked correct. It did not work:
+
+- `hermes/state.db` stores verbatim tool output, and it held a GitHub PAT. my-red
+  is public with **push protection** on, so every sync since 2026-10-18 was
+  rejected with `GH013 ... Push cannot contain secrets` — the WHOLE push, so
+  `hermes/`, `9router/` **and** `reserve/` all failed together.
+- step 16 swallowed it: `git push ... || echo '⚠️ Push failed'` followed by an
+  unconditional `✅ ... synced`. A rejected push looked like success in the log.
+- Net effect: `reserve/data.sqlite` never existed in any commit of my-red, and on
+  the 2026-11-20 rebuild step 13b found nothing to restore → fresh install →
+  **every booking was lost.** The 7 halls and 6 kinds you see on a "fresh" system
+  are the app's own seed (`server.js` → `seedHallsIfEmpty()`, `seedKinds()`), not
+  restored data. `bookings=0`, `users=0` (`needsSetup:true`) is the real state.
+
+**Fixed 2026-11-20** (`my-red` 2833267 + e6b165d, pushed to `academy`):
+- `.github/scripts/scrub-secrets.mjs` — byte-preserving (latin1) equal-length
+  redaction of token-shaped spans, run over `hermes/ 9router/ reserve/` before
+  `git add`. Equal length matters: a length change would shift bytes and corrupt
+  a sqlite file. Verified: `state.db` still `integrity_check = ok`, size unchanged.
+- step 16 now `exit 1`s on a rejected push instead of printing a check mark.
+- first-ever `reserve/data.sqlite` pushed (69632 bytes, 7 tables, 0 bookings).
+
+Check whether a sync has actually landed — never trust the step's own `✅`:
+```bash
+gh api repos/sadeghbiglar/my-red/contents/reserve/data.sqlite?ref=academy --jq '.size'
+gh api 'repos/sadeghbiglar/my-red/commits?per_page=3' --jq '.[] | .sha[0:7] + " " + (.commit.message|split("\n")[0])'
+```
+A `Sync hermes state...` commit that is weeks old means pushes are failing again.
 
 - **step 13b** (after the Hermes step, before the Laravel server): downloads
   `deploy.sh`, runs it with the runner's current Tailscale IP, then restores the db.
