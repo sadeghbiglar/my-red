@@ -6,14 +6,14 @@
     "first_seen_at": null,
     "last_patched_at": "2026-10-17T21:59:08.208814+00:00",
     "last_reused_patch_generation": 18,
-    "last_used_at": "2026-11-27T16:18:08.154484+00:00",
-    "last_viewed_at": "2026-11-27T16:18:08.153319+00:00",
+    "last_used_at": "2026-11-28T01:16:49.640649+00:00",
+    "last_viewed_at": "2026-11-28T01:16:49.639668+00:00",
     "patch_count": 18,
     "patch_generation": 18,
     "pinned": false,
     "state": "active",
-    "use_count": 36,
-    "view_count": 36
+    "use_count": 38,
+    "view_count": 38
   },
   "academy1-session": {
     "archived_at": null,
@@ -22,14 +22,14 @@
     "first_seen_at": null,
     "last_patched_at": "2026-10-17T21:59:01.760508+00:00",
     "last_reused_patch_generation": 15,
-    "last_used_at": "2026-11-27T16:19:00.240911+00:00",
-    "last_viewed_at": "2026-11-27T16:19:00.223503+00:00",
+    "last_used_at": "2026-11-28T01:18:47.545336+00:00",
+    "last_viewed_at": "2026-11-28T01:18:47.544331+00:00",
     "patch_count": 15,
     "patch_generation": 15,
     "pinned": false,
     "state": "active",
-    "use_count": 27,
-    "view_count": 27
+    "use_count": 29,
+    "view_count": 29
   },
   "agent-docs-audit": {
     "archived_at": "2026-11-20T16:00:25.370611+00:00",
